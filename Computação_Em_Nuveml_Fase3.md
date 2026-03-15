@@ -407,10 +407,20 @@ Future extensions to include:
 
 ```mermaid
 graph TD
-    Client[Client Applications] --> API[REST API Service]
-    API --> Processing[Data Processing Service]
-    API --> Prediction[Risk Prediction Service]
-    Processing --> Dataset[(US Accidents Dataset)]
-    Prediction --> Dataset
+    Client[Client Applications]
+
+API[REST API Service]
+Processing[Data Processing Service]
+Prediction[Risk Prediction Service]
+
+Dataset[(US Accidents Dataset)]
+
+Client -->|HTTP REST| API
+
+API -->|Data queries| Processing
+API -->|Prediction requests| Prediction
+
+Processing --> Dataset
+Prediction --> Dataset
 ```
 
