@@ -1,17 +1,17 @@
 """
-Data repository - Contains all query functions
+Data repository - Query functions for the 3 endpoints
 """
 
 import pandas as pd
 from typing import Optional, List, Dict, Any
 import logging
 
-from database.loader import get_dataset
+from dataset_service.loader import get_dataset
 
 logger = logging.getLogger(__name__)
 
 
-# State mapping for convenience
+# State mapping
 STATE_NAMES = {
     "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas",
     "CA": "California", "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware",
@@ -47,6 +47,7 @@ def get_statistics_by_state(
 ) -> Dict[str, Any]:
     """
     Get accident statistics for a state and date range.
+    Endpoint: /accidents/statistics/by-state
     """
     df = get_dataset()
     
@@ -74,11 +75,11 @@ def get_statistics_by_state(
 def analyze_by_weather(state: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Analyze accident distribution by weather condition.
+    Endpoint: /accidents/weather-analysis
     """
     df = get_dataset()
     
     filtered = df.copy()
-    
     if state:
         state_code = normalize_state(state)
         filtered = filtered[filtered['state'] == state_code]
@@ -108,6 +109,7 @@ def get_temporal_analysis(
 ) -> List[Dict[str, Any]]:
     """
     Get accident frequency by hour of day.
+    Endpoint: /accidents/temporal-analysis
     """
     df = get_dataset()
     
@@ -131,67 +133,5 @@ def get_temporal_analysis(
     
     return [
         {"hour": int(row['hour']), "accident_count": int(row['accident_count'])}
-        for _, row in result.iterrows()
-    ]
-
-
-def get_hotspots(
-    city: Optional[str] = None,
-    state: Optional[str] = None,
-    limit: int = 10
-) -> List[Dict[str, Any]]:
-    """
-    Identify accident hotspots (areas with highest accident concentration).
-    """
-    df = get_dataset()
-    
-    filtered = df.copy()
-    
-    if city:
-        filtered = filtered[filtered['city'].str.lower() == city.lower()]
-    if state:
-        state_code = normalize_state(state)
-        filtered = filtered[filtered['state'] == state_code]
-    
-    # Round coordinates to 3 decimals (~100m precision)
-    filtered['lat_rounded'] = filtered['latitude'].round(3)
-    filtered['lng_rounded'] = filtered['longitude'].round(3)
-    
-    hotspots = filtered.groupby(['lat_rounded', 'lng_rounded']).size().reset_index(name='accident_count')
-    hotspots = hotspots.sort_values('accident_count', ascending=False).head(limit)
-    
-    return [
-        {
-            "latitude": float(row['lat_rounded']),
-            "longitude": float(row['lng_rounded']),
-            "accident_count": int(row['accident_count'])
-        }
-        for _, row in hotspots.iterrows()
-    ]
-
-
-def compare_counties(state: str) -> List[Dict[str, Any]]:
-    """
-    Compare accident statistics across counties.
-    """
-    df = get_dataset()
-    
-    state_code = normalize_state(state)
-    filtered = df[df['state'] == state_code]
-    
-    result = filtered.groupby('county').agg(
-        accident_count=('severity', 'count'),
-        avg_severity=('severity', 'mean')
-    ).reset_index()
-    
-    result = result[result['county'] != 'Unknown']
-    result = result.sort_values('accident_count', ascending=False)
-    
-    return [
-        {
-            "county": row['county'],
-            "accident_count": int(row['accident_count']),
-            "avg_severity": round(row['avg_severity'], 2)
-        }
         for _, row in result.iterrows()
     ]

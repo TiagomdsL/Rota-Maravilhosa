@@ -1,5 +1,6 @@
-
-
+"""
+Dataset loader - Handles loading and caching of the dataset
+"""
 
 import pandas as pd
 import os
@@ -8,13 +9,11 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Colunas necessárias para a aplicação
 REQUIRED_COLUMNS = [
     'Start_Time', 'Severity', 'City', 'County', 'State',
-    'Weather_Condition', 'Lat', 'Lng'
+    'Weather_Condition', 'Start_Lat', 'Start_Lng'
 ]
 
-# Mapeamento de colunas (caso o ficheiro tenha nomes diferentes)
 COLUMN_MAPPING = {
     'Start_Time': 'start_time',
     'Severity': 'severity',
@@ -22,108 +21,98 @@ COLUMN_MAPPING = {
     'County': 'county',
     'State': 'state',
     'Weather_Condition': 'weather_condition',
-    'Lat': 'latitude',
-    'Lng': 'longitude'
+    'Start_Lat': 'latitude',
+    'Start_Lng': 'longitude'
 }
 
-# Cache do dataset (carregado uma vez)
 _dataset_cache = None
 _dataset_info = None
 
 
 def load_dataset(
     filepath: str,
-    nrows: Optional[int] = None,
+    chunksize: int = 50000,
     use_cache: bool = True
 ) -> pd.DataFrame:
     """
-    Load dataset from CSV file.
-    
-    Args:
-        filepath: Path to CSV file
-        nrows: Number of rows to load (None = all)
-        use_cache: Use cached dataset if available
-    
-    Returns:
-        DataFrame with loaded data
+    Load dataset using chunks to avoid memory issues
     """
-    global _dataset_cache
+    global _dataset_cache, _dataset_info
     
-    # Return cached version if available and requested
     if use_cache and _dataset_cache is not None:
         logger.info(f"Returning cached dataset ({len(_dataset_cache)} rows)")
         return _dataset_cache
     
     logger.info(f"Loading dataset from {filepath}")
     
-    # Load only required columns for memory efficiency
-    df = pd.read_csv(
+    if not os.path.exists(filepath):
+        raise FileNotFoundError(f"Dataset not found at {filepath}")
+    
+    # Carregar em chunks e concatenar
+    chunks = []
+    total_rows = 0
+    
+    logger.info("Reading CSV in chunks...")
+    for i, chunk in enumerate(pd.read_csv(
         filepath,
         usecols=REQUIRED_COLUMNS,
-        parse_dates=['Start_Time'],
-        nrows=nrows,
+        chunksize=chunksize,
         low_memory=False
-    )
+    )):
+        chunks.append(chunk)
+        total_rows += len(chunk)
+        logger.info(f"Loaded chunk {i+1}: {len(chunk)} rows (total: {total_rows})")
     
-    # Rename columns for consistency
-    df = df.rename(columns=COLUMN_MAPPING)
+    logger.info(f"Concatenating {len(chunks)} chunks...")
+    df = pd.concat(chunks, ignore_index=True)
     
-    # Convert Start_Time to datetime
-    df['start_time'] = pd.to_datetime(df['start_time'])
+    logger.info(f"Total rows loaded: {len(df)}")
     
-    # Clean weather condition (remove empty values)
-    df['weather_condition'] = df['weather_condition'].fillna('Unknown')
-    df['weather_condition'] = df['weather_condition'].replace('', 'Unknown')
+    # Converter Start_Time
+    if 'Start_Time' in df.columns:
+        df['Start_Time'] = pd.to_datetime(df['Start_Time'], errors='coerce')
     
-    # Clean city and county
-    df['city'] = df['city'].fillna('Unknown')
-    df['county'] = df['county'].fillna('Unknown')
+    # Renomear colunas
+    rename_map = {k: v for k, v in COLUMN_MAPPING.items() if k in df.columns}
+    df = df.rename(columns=rename_map)
     
-    # Cache the dataset
+    # Limpar dados
+    if 'weather_condition' in df.columns:
+        df['weather_condition'] = df['weather_condition'].fillna('Unknown')
+        df['weather_condition'] = df['weather_condition'].replace('', 'Unknown')
+    
+    if 'city' in df.columns:
+        df['city'] = df['city'].fillna('Unknown')
+    
+    if 'county' in df.columns:
+        df['county'] = df['county'].fillna('Unknown')
+    
     _dataset_cache = df
+    _dataset_info = {
+        "rows": len(df),
+        "columns": len(df.columns),
+        "column_names": list(df.columns),
+        "states": df['state'].nunique() if 'state' in df.columns else 0,
+        "cities": df['city'].nunique() if 'city' in df.columns else 0,
+        "date_range": {
+            "min": df['start_time'].min().isoformat() if 'start_time' in df.columns else None,
+            "max": df['start_time'].max().isoformat() if 'start_time' in df.columns else None
+        }
+    }
     
-    logger.info(f"Dataset loaded: {len(df)} rows, {len(df.columns)} columns")
-    
+    logger.info(f"Dataset loaded: {len(df)} rows")
     return df
 
 
 def get_dataset() -> pd.DataFrame:
-    """
-    Get the current dataset (must be loaded first).
-    Raises exception if not loaded.
-    """
+    """Get current dataset"""
     if _dataset_cache is None:
-        raise RuntimeError("Dataset not loaded. Call load_dataset() first.")
+        raise RuntimeError("Dataset not loaded")
     return _dataset_cache
 
 
 def get_dataset_info() -> dict:
-    """
-    Get information about the loaded dataset.
-    """
-    global _dataset_info
-    
+    """Get dataset information"""
     if _dataset_cache is None:
         return {"status": "not_loaded"}
-    
-    return {
-        "status": "loaded",
-        "rows": len(_dataset_cache),
-        "columns": len(_dataset_cache.columns),
-        "column_names": list(_dataset_cache.columns),
-        "states": _dataset_cache['state'].nunique(),
-        "cities": _dataset_cache['city'].nunique(),
-        "date_range": {
-            "min": _dataset_cache['start_time'].min().isoformat(),
-            "max": _dataset_cache['start_time'].max().isoformat()
-        }
-    }
-
-
-def reload_dataset(filepath: str, nrows: Optional[int] = None) -> pd.DataFrame:
-    """
-    Force reload of dataset (clears cache).
-    """
-    global _dataset_cache
-    _dataset_cache = None
-    return load_dataset(filepath, nrows)
+    return {"status": "loaded", **(_dataset_info or {})}
