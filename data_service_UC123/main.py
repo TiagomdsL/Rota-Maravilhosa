@@ -12,9 +12,6 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
-print(f"Python path includes: {parent_dir}")  # Para debug
-print(f"Files in dataset_service: {os.listdir(os.path.join(parent_dir, 'dataset_service'))}")  # Para debug
-
 from dataset_service import (
     load_dataset,
     get_dataset_info,
@@ -35,8 +32,6 @@ app = FastAPI(
 # Dataset configuration
 DATASET_PATH = os.getenv("DATASET_PATH", os.path.join(parent_dir, "dataset", "US_Accidents_March23.csv"))
 SAMPLE_ROWS = os.getenv("SAMPLE_ROWS", None)  # For testing, e.g., "10000"
-
-print(f"Dataset path: {DATASET_PATH}")  # Para debug
 
 try:
     load_dataset(DATASET_PATH)  # ← APENAS O CAMINHO

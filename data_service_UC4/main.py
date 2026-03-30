@@ -9,7 +9,7 @@ import pandas as pd
 
 app = FastAPI()
 
-dataset_path = os.path.join("dataset", "US_Accidents_sample.csv")
+dataset_path = os.path.join("dataset", "US_Accidents_March23.csv")
 load_dataset(dataset_path)
 
 class Accident(BaseModel):

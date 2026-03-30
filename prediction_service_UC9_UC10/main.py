@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Accident Prediction Service", version="1.0.0")
 
-DATASET_PATH = "../dataset/US_Accidents_March23.csv"
+dataset_path = os.path.join("dataset", "US_Accidents_March23.csv")
 CACHE_PATH = "accident_stats.pkl"
 
 
@@ -61,7 +61,7 @@ def load_stats():
     try:
         # Tenta ler apenas as primeiras N linhas
         df = pd.read_csv(
-            DATASET_PATH,
+            dataset_path,
             nrows=SAMPLE_SIZE,
             usecols=['Start_Time', 'Weather_Condition', 'Junction', 'Roundabout'],
             low_memory=False
@@ -77,7 +77,7 @@ def load_stats():
         total_read = 0
         
         for chunk in pd.read_csv(
-            DATASET_PATH,
+            dataset_path,
             chunksize=chunksize,
             usecols=['Start_Time', 'Weather_Condition', 'Junction', 'Roundabout'],
             low_memory=False

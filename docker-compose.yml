@@ -14,9 +14,9 @@ services:
       - DATA_SERVICE_UC8_UC11_URL=http://data-service-uc8-uc11:8007
       - PREDICTION_SERVICE_UC9_UC10_URL=http://prediction-service-uc9-uc10:8008
     depends_on:
-      - data-service
-      - prediction-service
-      - route-service
+      #- dataset-service
+      - prediction-service-uc5-uc6
+      - route-service-uc7
       - data-service-uc123
       - data-service-uc8-uc11
       - prediction-service-uc9-uc10
@@ -24,19 +24,19 @@ services:
       - accident-network
     restart: unless-stopped
 
-  # Data Service (original - port 8001)
-  data-service:
-    build: ./data_service
-    ports:
-      - "8001:8001"
-    volumes:
-      - ./dataset:/app/dataset
-      - ./dataset_service:/app/dataset_service
-    environment:
-      - DATASET_PATH=/app/dataset/US_Accidents_March23.csv
-    networks:
-      - accident-network
-    restart: unless-stopped
+  # DataSet Service (original - port 8001)
+  # dataset-service:
+  #   build: ./dataset_service
+  #   ports:
+  #     - "8001:8001"
+  #   volumes:
+  #     - ./dataset:/app/dataset
+  #     - ./dataset_service:/app/dataset_service
+  #   environment:
+  #     - DATASET_PATH=/app/dataset/US_Accidents_March23.csv
+  #   networks:
+  #     - accident-network
+  #   restart: unless-stopped
 
   # Data Service UC123 (port 8004)
   data-service-uc123:
@@ -66,8 +66,8 @@ services:
     restart: unless-stopped
 
   # Prediction Service (original - port 8002)
-  prediction-service:
-    build: ./prediction_service
+  prediction-service-uc5-uc6:
+    build: ./prediction_service_uc5_uc6
     ports:
       - "8002:8002"
     volumes:
@@ -77,8 +77,8 @@ services:
     environment:
       - DATASET_PATH=/app/dataset/US_Accidents_March23.csv
       - DATA_SERVICE_URL=http://data-service:8001
-    depends_on:
-      - data-service
+    #depends_on:
+      #- dataset-service
     networks:
       - accident-network
     restart: unless-stopped
@@ -98,14 +98,14 @@ services:
     restart: unless-stopped
 
   # Route Service (port 8003)
-  route-service:
-    build: ./route_service
+  route-service-uc7:
+    build: ./route_service_UC7
     ports:
       - "8003:8003"
     environment:
       - PREDICTION_SERVICE_URL=http://prediction-service:8002
     depends_on:
-      - prediction-service
+      - prediction-service-uc5-uc6
     networks:
       - accident-network
     restart: unless-stopped

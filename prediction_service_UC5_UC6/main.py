@@ -23,7 +23,7 @@ class RiskRequest(BaseModel):
 # Carregar dataset no startup
 @app.on_event("startup")
 def startup_event():
-    dataset_path = os.path.join("dataset", "US_Accidents_sample.csv")
+    dataset_path = os.path.join("dataset", "US_Accidents_March23.csv")
     load_dataset(dataset_path)
 
 @app.post("/predict-severity")
