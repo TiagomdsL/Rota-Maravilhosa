@@ -8,9 +8,6 @@ from fastapi import FastAPI, HTTPException, Query
 from typing import Optional
 import logging
 
-# Adicionar a pasta pai ao path para importar dataset_service
-# O ficheiro está em: fase4/data_service/main.py
-# O dataset_service está em: fase4/dataset_service/
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
@@ -114,7 +111,3 @@ async def temporal_analysis(
         logger.error(f"Error in temporal_analysis: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
