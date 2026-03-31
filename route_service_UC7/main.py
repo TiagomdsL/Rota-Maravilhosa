@@ -11,16 +11,12 @@ PREDICTION_SERVICE_URL = os.getenv("PREDICTION_SERVICE_URL", "http://localhost:8
 # Número de pontos intermédios entre origem e destino
 NUM_WAYPOINTS = 5
 
-
 class RouteRequest(BaseModel):
     origin_lat: float
     origin_lon: float
     destination_lat: float
     destination_lon: float
-    timestamp: str = "2016-02-08T08:00:00"  # default para testes
-
-
-# ── Helpers ────────────────────────────────────────────────────────────────────
+    timestamp: str = "2016-02-08T08:00:00"  
 
 def interpolate_waypoints(
     origin_lat: float, origin_lon: float,
@@ -33,7 +29,7 @@ def interpolate_waypoints(
     Futuro: trocar por Google Routes API para waypoints reais.
     """
     waypoints = []
-    for i in range(n + 2):  # +2 para incluir origem e destino
+    for i in range(n + 2):  
         t = i / (n + 1)
         waypoints.append({
             "latitude": round(origin_lat + t * (destination_lat - origin_lat), 6),
@@ -76,9 +72,6 @@ def aggregate_risk(waypoint_scores: list[dict]) -> float:
         for wp in waypoint_scores
     ]
     return round(sum(scores) / len(scores), 4)
-
-
-# ── Endpoint ───────────────────────────────────────────────────────────────────
 
 @app.post("/route/analyze")
 async def analyze_route(request: RouteRequest):

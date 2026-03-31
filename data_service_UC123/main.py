@@ -34,7 +34,7 @@ DATASET_PATH = os.getenv("DATASET_PATH", os.path.join(parent_dir, "dataset", "US
 SAMPLE_ROWS = os.getenv("SAMPLE_ROWS", None)  # For testing, e.g., "10000"
 
 try:
-    load_dataset(DATASET_PATH)  # ← APENAS O CAMINHO
+    load_dataset(DATASET_PATH, max_rows=500000)  # ← APENAS O CAMINHO
     logger.info("Dataset loaded successfully")
 except Exception as e:
     logger.error(f"Failed to load dataset: {e}")

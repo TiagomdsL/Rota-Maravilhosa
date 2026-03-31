@@ -1,3 +1,4 @@
+
 version: '3.8'
 
 services:
@@ -7,7 +8,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATA_SERVICE_URL=http://data-service:8001
+      - DATA_SERVICE_URL=http://data-service-uc4:8001
       - PREDICTION_SERVICE_URL=http://prediction-service-uc5-uc6:8002
       - ROUTE_SERVICE_URL=http://route-service-uc7:8003
       - DATA_SERVICE_URL_UC123=http://data-service-uc123:8004
@@ -37,6 +38,19 @@ services:
   #   networks:
   #     - accident-network
   #   restart: unless-stopped
+
+  data-service-uc4:
+    build: ./data_service_uc4
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./dataset:/app/dataset
+      - ./dataset_service:/app/dataset_service
+    environment:
+      - DATASET_PATH=/app/dataset/US_Accidents_March23.csv
+    networks:
+      - accident-network
+    restart: unless-stopped
 
   # Data Service UC123 (port 8004)
   data-service-uc123:
@@ -76,7 +90,7 @@ services:
       - prediction-cache:/app/cache
     environment:
       - DATASET_PATH=/app/dataset/US_Accidents_March23.csv
-      - DATA_SERVICE_URL=http://data-service:8001
+      - DATA_SERVICE_URL=http://data-service-uc4:8001
     #depends_on:
       #- dataset-service
     networks:

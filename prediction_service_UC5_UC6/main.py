@@ -24,7 +24,7 @@ class RiskRequest(BaseModel):
 @app.on_event("startup")
 def startup_event():
     dataset_path = os.path.join("dataset", "US_Accidents_March23.csv")
-    load_dataset(dataset_path)
+    load_dataset(dataset_path, max_rows=500000)
 
 @app.post("/predict-severity")
 def predict_severity(input_data: SeverityInput):

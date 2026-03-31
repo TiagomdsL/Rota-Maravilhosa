@@ -4,7 +4,6 @@ Dataset loader - Handles loading and caching of the dataset
 
 import pandas as pd
 import os
-import gc
 import logging
 from typing import Optional
 
@@ -29,28 +28,24 @@ COLUMN_MAPPING = {
     'Precipitation(in)': 'precipitation'
 }
 
-OPTIMIZED_DTYPES = {
-    'Severity':           'int8',
-    'State':              'category',
-    'City':               'category',
-    'County':             'category',
-    'Weather_Condition':  'category',
-    'Start_Lat':          'float32',
-    'Start_Lng':          'float32',
-    'Visibility(mi)':     'float32',
-    'Precipitation(in)':  'float32',
-}
-
 _dataset_cache = None
 _dataset_info = None
+
 
 def load_dataset(
     filepath: str,
     chunksize: int = 50000,
-    use_cache: bool = True
+    use_cache: bool = True,
+    max_rows: Optional[int] = None
 ) -> pd.DataFrame:
     """
     Load dataset using chunks to avoid memory issues
+    
+    Args:
+        filepath: Caminho para o arquivo CSV
+        chunksize: Número de linhas por chunk
+        use_cache: Usar cache se disponível
+        max_rows: Número máximo de linhas a carregar (None = todas)
     """
     global _dataset_cache, _dataset_info
     
@@ -62,37 +57,42 @@ def load_dataset(
     
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"Dataset not found at {filepath}")
-
-    # Aplicar apenas os dtypes das colunas que vamos carregar
-    dtype_map = {k: v for k, v in OPTIMIZED_DTYPES.items() if k in REQUIRED_COLUMNS}
-
+    
     # Carregar em chunks e concatenar
     chunks = []
     total_rows = 0
+    max_reached = False
     
     logger.info("Reading CSV in chunks...")
+    
+    # Se max_rows foi definido, podemos limitar a leitura
+    if max_rows is not None:
+        logger.info(f"Limiting to first {max_rows:,} rows")
+    
     for i, chunk in enumerate(pd.read_csv(
         filepath,
         usecols=REQUIRED_COLUMNS,
-        dtype=dtype_map,
         chunksize=chunksize,
-        low_memory=False
+        low_memory=False,
+        nrows=max_rows  # <-- LIMITA O NÚMERO DE LINHAS
     )):
         chunks.append(chunk)
         total_rows += len(chunk)
         logger.info(f"Loaded chunk {i+1}: {len(chunk)} rows (total: {total_rows})")
+        
+        # Se atingiu o limite, para de carregar
+        if max_rows is not None and total_rows >= max_rows:
+            logger.info(f"Reached max_rows limit ({max_rows:,})")
+            break
     
     logger.info(f"Concatenating {len(chunks)} chunks...")
-    df = pd.concat(chunks, ignore_index=True, copy=False)
-
-    del chunks
-    gc.collect()
+    df = pd.concat(chunks, ignore_index=True)
+    
+    # Se max_rows foi definido, garantir que não ultrapassou
+    if max_rows is not None and len(df) > max_rows:
+        df = df.head(max_rows)
     
     logger.info(f"Total rows loaded: {len(df)}")
-
-    # Consolidar categoricals após concat (remove categorias duplicadas entre chunks)
-    for col in df.select_dtypes('category').columns:
-        df[col] = df[col].cat.remove_unused_categories()
     
     # Converter Start_Time
     if 'Start_Time' in df.columns:
@@ -121,12 +121,12 @@ def load_dataset(
         "states": df['state'].nunique() if 'state' in df.columns else 0,
         "cities": df['city'].nunique() if 'city' in df.columns else 0,
         "date_range": {
-            "min": df['start_time'].min().isoformat() if 'start_time' in df.columns else None,
-            "max": df['start_time'].max().isoformat() if 'start_time' in df.columns else None
+            "min": df['start_time'].min().isoformat() if 'start_time' in df.columns and len(df) > 0 else None,
+            "max": df['start_time'].max().isoformat() if 'start_time' in df.columns and len(df) > 0 else None
         }
     }
     
-    logger.info(f"Dataset loaded: {len(df)} rows | RAM: {df.memory_usage(deep=True).sum() / 1e6:.1f} MB")
+    logger.info(f"Dataset loaded: {len(df)} rows")
     return df
 
 

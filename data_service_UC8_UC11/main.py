@@ -1,3 +1,4 @@
+import os
 from fastapi import FastAPI, Query
 import pandas as pd
 from functools import lru_cache
@@ -5,7 +6,7 @@ from typing import Optional
 
 app = FastAPI()
 
-DATA_PATH = "../dataset/US_Accidents_March23.csv"
+DATA_PATH = os.getenv("DATASET_PATH", "/app/dataset/US_Accidents_March23.csv")
 _dataset_cache = None
 
 def load_data():
@@ -26,7 +27,8 @@ def load_data():
             _dataset_cache = pd.read_csv(
                 DATA_PATH,
                 usecols=required_columns,
-                low_memory=False
+                low_memory=False,
+                nrows = 500000
             )
         except ValueError:
             # Se algumas colunas não existirem, carrega todas

@@ -10,7 +10,7 @@ import pandas as pd
 app = FastAPI()
 
 dataset_path = os.path.join("dataset", "US_Accidents_March23.csv")
-load_dataset(dataset_path)
+load_dataset(dataset_path, max_rows=500000)
 
 class Accident(BaseModel):
     latitude: float
