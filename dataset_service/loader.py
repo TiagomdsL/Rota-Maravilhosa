@@ -4,6 +4,7 @@ Dataset loader - Handles loading and caching of the dataset
 
 import pandas as pd
 import os
+import gc
 import logging
 from typing import Optional
 
@@ -28,9 +29,20 @@ COLUMN_MAPPING = {
     'Precipitation(in)': 'precipitation'
 }
 
+OPTIMIZED_DTYPES = {
+    'Severity':           'int8',
+    'State':              'category',
+    'City':               'category',
+    'County':             'category',
+    'Weather_Condition':  'category',
+    'Start_Lat':          'float32',
+    'Start_Lng':          'float32',
+    'Visibility(mi)':     'float32',
+    'Precipitation(in)':  'float32',
+}
+
 _dataset_cache = None
 _dataset_info = None
-
 
 def load_dataset(
     filepath: str,
@@ -50,7 +62,10 @@ def load_dataset(
     
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"Dataset not found at {filepath}")
-    
+
+    # Aplicar apenas os dtypes das colunas que vamos carregar
+    dtype_map = {k: v for k, v in OPTIMIZED_DTYPES.items() if k in REQUIRED_COLUMNS}
+
     # Carregar em chunks e concatenar
     chunks = []
     total_rows = 0
@@ -59,6 +74,7 @@ def load_dataset(
     for i, chunk in enumerate(pd.read_csv(
         filepath,
         usecols=REQUIRED_COLUMNS,
+        dtype=dtype_map,
         chunksize=chunksize,
         low_memory=False
     )):
@@ -67,9 +83,16 @@ def load_dataset(
         logger.info(f"Loaded chunk {i+1}: {len(chunk)} rows (total: {total_rows})")
     
     logger.info(f"Concatenating {len(chunks)} chunks...")
-    df = pd.concat(chunks, ignore_index=True)
+    df = pd.concat(chunks, ignore_index=True, copy=False)
+
+    del chunks
+    gc.collect()
     
     logger.info(f"Total rows loaded: {len(df)}")
+
+    # Consolidar categoricals após concat (remove categorias duplicadas entre chunks)
+    for col in df.select_dtypes('category').columns:
+        df[col] = df[col].cat.remove_unused_categories()
     
     # Converter Start_Time
     if 'Start_Time' in df.columns:
@@ -103,7 +126,7 @@ def load_dataset(
         }
     }
     
-    logger.info(f"Dataset loaded: {len(df)} rows")
+    logger.info(f"Dataset loaded: {len(df)} rows | RAM: {df.memory_usage(deep=True).sum() / 1e6:.1f} MB")
     return df
 
 

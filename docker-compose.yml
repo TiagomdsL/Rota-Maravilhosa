@@ -8,8 +8,8 @@ services:
       - "8000:8000"
     environment:
       - DATA_SERVICE_URL=http://data-service:8001
-      - PREDICTION_SERVICE_URL=http://prediction-service:8002
-      - ROUTE_SERVICE_URL=http://route-service:8003
+      - PREDICTION_SERVICE_URL=http://prediction-service-uc5-uc6:8002
+      - ROUTE_SERVICE_URL=http://route-service-uc7:8003
       - DATA_SERVICE_URL_UC123=http://data-service-uc123:8004
       - DATA_SERVICE_UC8_UC11_URL=http://data-service-uc8-uc11:8007
       - PREDICTION_SERVICE_UC9_UC10_URL=http://prediction-service-uc9-uc10:8008
