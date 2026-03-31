@@ -9,3 +9,5 @@ Our dataset loading is limited to half million samples due to performance issues
 In order to run our program it is mandatory to have Docker Desktop installed. The command to run is docker-compose up --build.
 To access the endpoints we used Swagger with the following URL http://127.0.0.1:8000/docs#/.
 
+To run in a local environment we used commands like this one: uvicorn prediction_service.main:app --reload --port 8002 with the necessary 
+changes to each service. The command should be executed in parallel in different terminals.
