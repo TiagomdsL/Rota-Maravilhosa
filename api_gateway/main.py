@@ -73,7 +73,11 @@ async def forward_request(
 @app.get("/health")
 async def health():
     return {"gateway": "ok"}
- 
+
+@app.route('/ready')
+def ready():
+    return {"status": "ready"}, 200
+
 @app.post("/accidents/predict-severity")
 async def gateway_predict_severity(input_data: SeverityInput):
     try:
