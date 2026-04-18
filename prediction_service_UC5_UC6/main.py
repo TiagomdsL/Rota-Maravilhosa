@@ -21,6 +21,10 @@ class RiskRequest(BaseModel):
     timestamp: datetime
     
 # Carregar dataset no startup
+@app.get("/health")
+async def health():
+    return {"gateway": "ok"}
+
 @app.on_event("startup")
 def startup_event():
     dataset_path = os.path.join("dataset", "US_Accidents_sample.csv")

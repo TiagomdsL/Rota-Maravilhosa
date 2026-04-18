@@ -21,7 +21,6 @@ class RouteRequest(BaseModel):
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
-
 def interpolate_waypoints(
     origin_lat: float, origin_lon: float,
     destination_lat: float, destination_lon: float,
@@ -79,6 +78,10 @@ def aggregate_risk(waypoint_scores: list[dict]) -> float:
 
 
 # ── Endpoint ───────────────────────────────────────────────────────────────────
+
+@app.get("/health")
+async def health():
+    return {"gateway": "ok"}
 
 @app.post("/route/analyze")
 async def analyze_route(request: RouteRequest):
