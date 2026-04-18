@@ -4,6 +4,8 @@ import pandas as pd
 from functools import lru_cache
 from typing import Optional
 
+from prediction_service_UC9_UC10.main import STATS
+
 app = FastAPI()
 
 DATA_PATH = os.getenv("DATASET_PATH", "/app/dataset/US_Accidents_March23.csv")
@@ -68,3 +70,7 @@ def county_comparison(state: str):
     ).reset_index()
     
     return grouped.to_dict(orient="records")
+
+@app.get("/health")
+async def health():
+    return {"gateway": "ok"}

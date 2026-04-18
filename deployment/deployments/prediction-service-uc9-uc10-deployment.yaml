@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prediction-service-uc9-uc10
+  namespace: rota-maravilhosa
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: prediction-service-uc9-uc10
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: prediction-service-uc9-uc10
+    spec:
+      containers:
+      - name: prediction-service-uc9-uc10
+        image: europe-west1-docker.pkg.dev/proj1CC/rota-maravilhosa/prediction-service-uc9-uc10:v1
+        ports:
+        - containerPort: 8008
+        resources:
+          requests:
+            cpu: "150m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8008
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        envFrom:
+        - configMapRef:
+            name: rota-maravilhosa-config
