@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
       - name: prediction-service
-        image: europe-west1-docker.pkg.dev/PROJECT/rota-maravilhosa/prediction-service-uc5-uc6:latest
+        image: europe-west1-docker.pkg.dev/proj1CC/rota-maravilhosa/prediction-service-uc5-uc6:latest
         ports:
         - containerPort: 8002
         resources:
