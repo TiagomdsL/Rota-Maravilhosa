@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: data-service-uc123
+  namespace: rota-maravilhosa
+spec:
+  selector:
+    app: data-service-uc123
+  ports:
+  - protocol: TCP
+    port: 8008
+    targetPort: 8008
