@@ -20,6 +20,10 @@ class Accident(BaseModel):
 class BoundingBoxResponse(BaseModel):
     accidents: List[Accident]
 
+@app.get("/health")
+async def health():
+    return {"gateway": "ok"}
+
 @app.post("/features")
 def get_location_features(payload: dict):
     """

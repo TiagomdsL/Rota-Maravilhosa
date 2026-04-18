@@ -16,7 +16,10 @@ class RouteRequest(BaseModel):
     origin_lon: float
     destination_lat: float
     destination_lon: float
-    timestamp: str = "2016-02-08T08:00:00"  
+    timestamp: str = "2016-02-08T08:00:00"  # default para testes
+
+
+# ── Helpers ────────────────────────────────────────────────────────────────────
 
 def interpolate_waypoints(
     origin_lat: float, origin_lon: float,
@@ -72,6 +75,10 @@ def aggregate_risk(waypoint_scores: list[dict]) -> float:
         for wp in waypoint_scores
     ]
     return round(sum(scores) / len(scores), 4)
+
+@app.get("/health")
+async def health():
+    return {"gateway": "ok"}
 
 @app.post("/route/analyze")
 async def analyze_route(request: RouteRequest):
