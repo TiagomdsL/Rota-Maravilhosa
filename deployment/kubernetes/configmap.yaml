@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rota-maravilhosa-config
+  namespace: rota-maravilhosa
+data:
+  # Ambiente
+  ENVIRONMENT: "production"
+  LOG_LEVEL: "INFO"
+  
+  DATA_SERVICE_URL: "http://data-service-uc4:8001"
+  DATA_SERVICE_UC8_UC11_URL: "http://data-service-uc8-uc11:8007"
+  DATA_SERVICE_URL_UC123: "http://data-service-uc123:8004"
+  PREDICTION_SERVICE_URL: "http://prediction-service-uc5-uc6:8002"
+  PREDICTION_SERVICE_UC9_UC10_URL: "http://prediction-service-uc9-uc10:8008"
+  ROUTE_SERVICE_URL: "http://route-service-uc7:8003"
