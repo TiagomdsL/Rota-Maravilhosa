@@ -8,5 +8,5 @@ spec:
     app: data-service-uc123
   ports:
   - protocol: TCP
-    port: 8004
-    targetPort: 8004
+    port: 8008
+    targetPort: 8008
