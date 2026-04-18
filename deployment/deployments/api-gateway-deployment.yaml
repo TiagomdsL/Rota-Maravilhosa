@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
       - name: api-gateway
-        image: europe-west1-docker.pkg.dev/PROJECT/rota-maravilhosa/api-gateway:latest
+        image: europe-west1-docker.pkg.dev/proj1CC/rota-maravilhosa/api-gateway:latest
         ports:
         - containerPort: 8000
         resources:

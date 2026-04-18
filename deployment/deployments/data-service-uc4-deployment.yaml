@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
       - name: data-service-uc4
-        image: europe-west1-docker.pkg.dev/PROJECT/rota-maravilhosa/data-service-uc4:latest
+        image: europe-west1-docker.pkg.dev/proj1CC/rota-maravilhosa/data-service-uc4:latest
         ports:
         - containerPort: 8001
         resources:
