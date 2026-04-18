@@ -41,9 +41,8 @@ except Exception as e:
 
 
 @app.get("/health")
-async def health_check():
-    """Health check endpoint"""
-    return get_dataset_info()
+async def health():
+    return {"gateway": "ok"}
 
 
 @app.get("/accidents/statistics/by-state")
