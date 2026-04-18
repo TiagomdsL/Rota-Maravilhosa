@@ -80,13 +80,13 @@ spec:
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: route-service-uc4-hpa
+  name: route-service-uc7-hpa
   namespace: rota-maravilhosa
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: data_service_uc4
+    name: route_service_uc7
   minReplicas: 1
   maxReplicas: 6
   metrics: 
@@ -123,7 +123,6 @@ spec:
       target:
         type: Utilization
         averageUtilization: 70
-#--- #hpa data_service_uc123
 --- #hpa data_service_uc8_uc11
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
@@ -150,3 +149,29 @@ spec:
       target:
         type: Utilization
         averageUtilization: 60
+--- #hpa data_service_uc123
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: data-service-uc123-hpa
+  namespace: rota-maravilhosa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: data_service_uc123
+  minReplicas: 1
+  maxReplicas: 5
+  metrics: 
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 50
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 50
