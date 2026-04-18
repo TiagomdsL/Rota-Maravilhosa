@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: data-service-uc4
+  namespace: rota-maravilhosa
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: data-service-uc4
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: data-service-uc4
+    spec:
+      containers:
+      - name: data-service-uc4
+        image: europe-west1-docker.pkg.dev/PROJECT/rota-maravilhosa/data-service-uc4:latest
+        ports:
+        - containerPort: 8001
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "64Mi"
+          limits:
+            cpu: "200m"
+            memory: "128Mi"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8001
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8001
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        envFrom:
+        - configMapRef:
+            name: rota-maravilhosa-config
+#        volumeMounts:
+#        - name: dataset
+#          mountPath: /data
+#      volumes:  #rever consoante o tipo de armazenamento de dados escolhido
+#      - name: dataset
+#        persistentVolumeClaim:
+#          claimName: dataset-pvc
