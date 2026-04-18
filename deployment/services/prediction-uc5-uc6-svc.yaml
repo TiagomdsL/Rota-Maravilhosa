@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: prediction-service-uc5-uc6
+  namespace: rota-maravilhosa
+spec:
+  selector:
+    app: prediction-service-uc5-uc6
+  ports:
+  - protocol: TCP
+    port: 8002
+    targetPort: 8002
