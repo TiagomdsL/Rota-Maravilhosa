@@ -1,112 +1,115 @@
-"""
-Data Service - Main FastAPI application for the 3 endpoints
-"""
-
-import sys
 import os
+import json
+import logging
 from fastapi import FastAPI, HTTPException, Query
 from typing import Optional
-import logging
-
-parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if parent_dir not in sys.path:
-    sys.path.insert(0, parent_dir)
-
-print(f"Python path includes: {parent_dir}")  # Para debug
-print(f"Files in dataset_service: {os.listdir(os.path.join(parent_dir, 'dataset_service'))}")  # Para debug
-
-from dataset_service import (
-    load_dataset,
-    get_dataset_info,
-    get_statistics_by_state,
-    analyze_by_weather,
-    get_temporal_analysis
-)
+from google.cloud import bigquery
+from google.oauth2 import service_account
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+app = FastAPI(title="Data Service", version="1.0.0")
 
-app = FastAPI(
-    title="Data Service",
-    version="1.0.0",
-    description="Service for querying US Accidents dataset"
-)
+PROJECT = "proj1cc-493515"
+TABLE = "proj1cc-493515.accidents.accidents"
+LOCATION = "US"
 
-# Dataset configuration
-DATASET_PATH = os.getenv("DATASET_PATH", os.path.join(parent_dir, "dataset", "US_Accidents_March23.csv"))
-SAMPLE_ROWS = os.getenv("SAMPLE_ROWS", None)  # For testing, e.g., "10000"
+STATE_NAMES = {
+    "AL":"Alabama","AK":"Alaska","AZ":"Arizona","AR":"Arkansas","CA":"California",
+    "CO":"Colorado","CT":"Connecticut","DE":"Delaware","FL":"Florida","GA":"Georgia",
+    "HI":"Hawaii","ID":"Idaho","IL":"Illinois","IN":"Indiana","IA":"Iowa","KS":"Kansas",
+    "KY":"Kentucky","LA":"Louisiana","ME":"Maine","MD":"Maryland","MA":"Massachusetts",
+    "MI":"Michigan","MN":"Minnesota","MS":"Mississippi","MO":"Missouri","MT":"Montana",
+    "NE":"Nebraska","NV":"Nevada","NH":"New Hampshire","NJ":"New Jersey","NM":"New Mexico",
+    "NY":"New York","NC":"North Carolina","ND":"North Dakota","OH":"Ohio","OK":"Oklahoma",
+    "OR":"Oregon","PA":"Pennsylvania","RI":"Rhode Island","SC":"South Carolina",
+    "SD":"South Dakota","TN":"Tennessee","TX":"Texas","UT":"Utah","VT":"Vermont",
+    "VA":"Virginia","WA":"Washington","WV":"West Virginia","WI":"Wisconsin","WY":"Wyoming"
+}
+NAME_TO_CODE = {v: k for k, v in STATE_NAMES.items()}
 
-print(f"Dataset path: {DATASET_PATH}")  # Para debug
+def get_client():
+    api_token = os.environ.get("API_TOKEN")
+    if api_token:
+        credentials = service_account.Credentials.from_service_account_info(
+            json.loads(api_token))
+        return bigquery.Client(credentials=credentials, project=PROJECT, location=LOCATION)
+    return bigquery.Client(project=PROJECT, location=LOCATION)
 
-try:
-    load_dataset(DATASET_PATH)  # ← APENAS O CAMINHO
-    logger.info("Dataset loaded successfully")
-except Exception as e:
-    logger.error(f"Failed to load dataset: {e}")
-
+def normalize_state(state: str) -> str:
+    state = state.strip()
+    if len(state) == 2:
+        return state.upper()
+    if state in NAME_TO_CODE:
+        return NAME_TO_CODE[state]
+    raise ValueError(f"Invalid state: {state}")
 
 @app.get("/health")
 async def health():
-    return {"gateway": "ok"}
+    return {"status": "ok"}
 
+@app.get("/ready")
+async def ready():
+    return {"status": "ok"}
 
 @app.get("/accidents/statistics/by-state")
 async def get_statistics(
-    state: str = Query(..., description="US state name or code (e.g., CA, California)"),
-    start_date: str = Query(..., description="Start date (YYYY-MM-DD)"),
-    end_date: str = Query(..., description="End date (YYYY-MM-DD)")
+    state: str = Query(...),
+    start_date: str = Query(...),
+    end_date: str = Query(...)
 ):
-    """
-    Get accident statistics by state and date range.
-    
-    Returns total number of accidents and average severity.
-    """
     try:
-        return get_statistics_by_state(state, start_date, end_date)
+        state_code = normalize_state(state)
+        client = get_client()
+        sql = f"""
+            SELECT COUNT(*) as total_accidents, AVG(Severity) as avg_severity
+            FROM `{TABLE}`
+            WHERE State = '{state_code}'
+            AND Start_Time BETWEEN '{start_date}' AND '{end_date}'
+        """
+        row = list(client.query(sql).result())[0]
+        return {
+            "state": state_code,
+            "state_name": STATE_NAMES.get(state_code, state_code),
+            "total_accidents": row["total_accidents"],
+            "avg_severity": round(row["avg_severity"] or 0, 2)
+        }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except RuntimeError as e:
-        raise HTTPException(status_code=503, detail=str(e))
-    except Exception as e:
-        logger.error(f"Error in get_statistics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.get("/accidents/weather-analysis")
-async def weather_analysis(
-    state: Optional[str] = Query(None, description="Filter by state name or code")
-):
-    """
-    Analyze accidents by weather condition.
-    
-    Returns number of accidents and average severity grouped by weather condition.
-    """
+async def weather_analysis(state: Optional[str] = Query(None)):
     try:
-        return analyze_by_weather(state)
+        where = f"WHERE State = '{normalize_state(state)}'" if state else ""
+        client = get_client()
+        sql = f"""
+            SELECT Weather_Condition, COUNT(*) as accident_count, AVG(Severity) as avg_severity
+            FROM `{TABLE}`
+            {where}
+            GROUP BY Weather_Condition
+            HAVING Weather_Condition IS NOT NULL
+            ORDER BY accident_count DESC
+        """
+        return [{"weather_condition": r["Weather_Condition"],
+                 "accident_count": int(r["accident_count"]),
+                 "avg_severity": round(r["avg_severity"] or 0, 2)}
+                for r in client.query(sql).result()]
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except RuntimeError as e:
-        raise HTTPException(status_code=503, detail=str(e))
-    except Exception as e:
-        logger.error(f"Error in weather_analysis: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.get("/accidents/temporal-analysis")
 async def temporal_analysis(
-    city: str = Query(..., description="City name"),
-    day_of_week: Optional[str] = Query(None, description="Filter by day of week (Monday, Tuesday, etc.)")
+    city: str = Query(...),
+    day_of_week: Optional[str] = Query(None)
 ):
+    day_filter = f"AND FORMAT_TIMESTAMP('%A', Start_Time) = '{day_of_week}'" if day_of_week else ""
+    client = get_client()
+    sql = f"""
+        SELECT EXTRACT(HOUR FROM Start_Time) as hour, COUNT(*) as accident_count
+        FROM `{TABLE}`
+        WHERE LOWER(City) = LOWER('{city}')
+        {day_filter}
+        GROUP BY hour ORDER BY hour
     """
-    Get accident frequency by hour of day.
-    
-    Returns accident count for each hour (0-23).
-    """
-    try:
-        return get_temporal_analysis(city, day_of_week)
-    except RuntimeError as e:
-        raise HTTPException(status_code=503, detail=str(e))
-    except Exception as e:
-        logger.error(f"Error in temporal_analysis: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
+    hour_map = {int(r["hour"]): int(r["accident_count"])
+                for r in client.query(sql).result()}
+    return [{"hour": h, "accident_count": hour_map.get(h, 0)} for h in range(24)]
