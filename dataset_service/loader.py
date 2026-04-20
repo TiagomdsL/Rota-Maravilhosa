@@ -1,144 +1,102 @@
 """
-Dataset loader - Handles loading and caching of the dataset
+Dataset loader - Reads from BigQuery instead of CSV
 """
-
-import pandas as pd
 import os
+import json
 import logging
+import pandas as pd
+from google.cloud import bigquery
+from google.oauth2 import service_account
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-REQUIRED_COLUMNS = [
-    'Start_Time', 'Severity', 'City', 'County', 'State',
-    'Weather_Condition', 'Start_Lat', 'Start_Lng', 'Visibility(mi)', 
-    'Precipitation(in)'
-]
-
-COLUMN_MAPPING = {
-    'Start_Time': 'start_time',
-    'Severity': 'severity',
-    'City': 'city',
-    'County': 'county',
-    'State': 'state',
-    'Weather_Condition': 'weather_condition',
-    'Start_Lat': 'latitude',
-    'Start_Lng': 'longitude',
-    'Visibility(mi)': 'visibility',
-    'Precipitation(in)': 'precipitation'
-}
+PROJECT = "proj1cc-493515"
+TABLE = "proj1cc-493515.accidents.accidents"
+LOCATION = "US"
 
 _dataset_cache = None
 _dataset_info = None
 
+def get_bq_client():
+    api_token = os.environ.get("API_TOKEN")
+    if api_token:
+        credentials_info = json.loads(api_token)
+        client = bigquery.Client.from_service_account_info(credentials_info)
+        return client
+    return bigquery.Client(project=PROJECT, location=LOCATION)
 
 def load_dataset(
-    filepath: str,
+    filepath: str = None,
     chunksize: int = 50000,
     use_cache: bool = True,
-    max_rows: Optional[int] = None
+    max_rows: Optional[int] = 100000
 ) -> pd.DataFrame:
-    """
-    Load dataset using chunks to avoid memory issues
-    
-    Args:
-        filepath: Caminho para o arquivo CSV
-        chunksize: Número de linhas por chunk
-        use_cache: Usar cache se disponível
-        max_rows: Número máximo de linhas a carregar (None = todas)
-    """
     global _dataset_cache, _dataset_info
-    
+
     if use_cache and _dataset_cache is not None:
         logger.info(f"Returning cached dataset ({len(_dataset_cache)} rows)")
         return _dataset_cache
-    
-    logger.info(f"Loading dataset from {filepath}")
-    
-    if not os.path.exists(filepath):
-        raise FileNotFoundError(f"Dataset not found at {filepath}")
-    
-    # Carregar em chunks e concatenar
-    chunks = []
-    total_rows = 0
-    max_reached = False
-    
-    logger.info("Reading CSV in chunks...")
-    
-    # Se max_rows foi definido, podemos limitar a leitura
-    if max_rows is not None:
-        logger.info(f"Limiting to first {max_rows:,} rows")
-    
-    for i, chunk in enumerate(pd.read_csv(
-        filepath,
-        usecols=REQUIRED_COLUMNS,
-        chunksize=chunksize,
-        low_memory=False,
-        nrows=max_rows  # <-- LIMITA O NÚMERO DE LINHAS
-    )):
-        chunks.append(chunk)
-        total_rows += len(chunk)
-        logger.info(f"Loaded chunk {i+1}: {len(chunk)} rows (total: {total_rows})")
-        
-        # Se atingiu o limite, para de carregar
-        if max_rows is not None and total_rows >= max_rows:
-            logger.info(f"Reached max_rows limit ({max_rows:,})")
-            break
-    
-    logger.info(f"Concatenating {len(chunks)} chunks...")
-    df = pd.concat(chunks, ignore_index=True)
-    
-    # Se max_rows foi definido, garantir que não ultrapassou
-    if max_rows is not None and len(df) > max_rows:
-        df = df.head(max_rows)
-    
-    logger.info(f"Total rows loaded: {len(df)}")
-    
-    # Converter Start_Time
-    if 'Start_Time' in df.columns:
-        df['Start_Time'] = pd.to_datetime(df['Start_Time'], errors='coerce')
-    
+
+    logger.info(f"Loading dataset from BigQuery: {TABLE}")
+
+    client = get_bq_client()
+    limit = f"LIMIT {max_rows}" if max_rows else ""
+
+    sql = f"""
+        SELECT
+            Start_Time, Severity, City, County, State,
+            Weather_Condition, Start_Lat, Start_Lng,
+            Visibility_mi_, Precipitation_in_
+        FROM `{TABLE}`
+        {limit}
+    """
+
+    df = client.query(sql).to_dataframe()
+    logger.info(f"Loaded {len(df)} rows from BigQuery")
+
     # Renomear colunas
-    rename_map = {k: v for k, v in COLUMN_MAPPING.items() if k in df.columns}
-    df = df.rename(columns=rename_map)
-    
-    # Limpar dados
+    df = df.rename(columns={
+        'Start_Time': 'start_time',
+        'Severity': 'severity',
+        'City': 'city',
+        'County': 'county',
+        'State': 'state',
+        'Weather_Condition': 'weather_condition',
+        'Start_Lat': 'latitude',
+        'Start_Lng': 'longitude',
+        'Visibility_mi_': 'visibility',
+        'Precipitation_in_': 'precipitation'
+    })
+
+    if 'start_time' in df.columns:
+        df['start_time'] = pd.to_datetime(df['start_time'], errors='coerce')
     if 'weather_condition' in df.columns:
         df['weather_condition'] = df['weather_condition'].fillna('Unknown')
-        df['weather_condition'] = df['weather_condition'].replace('', 'Unknown')
-    
     if 'city' in df.columns:
         df['city'] = df['city'].fillna('Unknown')
-    
     if 'county' in df.columns:
         df['county'] = df['county'].fillna('Unknown')
-    
+
     _dataset_cache = df
     _dataset_info = {
         "rows": len(df),
         "columns": len(df.columns),
-        "column_names": list(df.columns),
         "states": df['state'].nunique() if 'state' in df.columns else 0,
         "cities": df['city'].nunique() if 'city' in df.columns else 0,
-        "date_range": {
-            "min": df['start_time'].min().isoformat() if 'start_time' in df.columns and len(df) > 0 else None,
-            "max": df['start_time'].max().isoformat() if 'start_time' in df.columns and len(df) > 0 else None
-        }
     }
-    
-    logger.info(f"Dataset loaded: {len(df)} rows")
+
+    logger.info(f"Dataset ready: {len(df)} rows")
     return df
 
 
 def get_dataset() -> pd.DataFrame:
-    """Get current dataset"""
     if _dataset_cache is None:
         raise RuntimeError("Dataset not loaded")
     return _dataset_cache
 
 
 def get_dataset_info() -> dict:
-    """Get dataset information"""
     if _dataset_cache is None:
         return {"status": "not_loaded"}
-    return {"status": "loaded", **(_dataset_info or {})}
+    return _dataset_info

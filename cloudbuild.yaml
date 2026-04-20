@@ -1,0 +1,61 @@
+steps:
+  # api_gateway
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'us-west4-docker.pkg.dev/proj1cc-493515/rota-maravilhosa/api-gateway:latest', '-f', 'api_gateway/Dockerfile', '.']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-west4-docker.pkg.dev/proj1cc-493515/rota-maravilhosa/api-gateway:latest']
+
+  # data_service_UC4
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'us-west4-docker.pkg.dev/proj1cc-493515/rota-maravilhosa/data-service-uc4:latest', '-f', 'data_service_UC4/Dockerfile', '.']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-west4-docker.pkg.dev/proj1cc-493515/rota-maravilhosa/data-service-uc4:latest']
+
+  # data_service_UC123
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'us-west4-docker.pkg.dev/proj1cc-493515/rota-maravilhosa/data-service-uc123:latest', '-f', 'data_service_UC123/Dockerfile', '.']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-west4-docker.pkg.dev/proj1cc-493515/rota-maravilhosa/data-service-uc123:latest']
+
+  # data_service_UC8_UC11
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'us-west4-docker.pkg.dev/proj1cc-493515/rota-maravilhosa/data-service-uc8-uc11:latest', '-f', 'data_service_UC8_UC11/Dockerfile', '.']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-west4-docker.pkg.dev/proj1cc-493515/rota-maravilhosa/data-service-uc8-uc11:latest']
+
+  # dataset_service
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'us-west4-docker.pkg.dev/proj1cc-493515/rota-maravilhosa/dataset-service:latest', '-f', 'dataset_service/Dockerfile', '.']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-west4-docker.pkg.dev/proj1cc-493515/rota-maravilhosa/dataset-service:latest']
+
+  # prediction_service_UC5_UC6
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'us-west4-docker.pkg.dev/proj1cc-493515/rota-maravilhosa/prediction-service-uc5-uc6:latest', '-f', 'prediction_service_UC5_UC6/Dockerfile', '.']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-west4-docker.pkg.dev/proj1cc-493515/rota-maravilhosa/prediction-service-uc5-uc6:latest']
+
+  # prediction_service_UC9_UC10
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'us-west4-docker.pkg.dev/proj1cc-493515/rota-maravilhosa/prediction-service-uc9-uc10:latest', '-f', 'prediction_service_UC9_UC10/Dockerfile', '.']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-west4-docker.pkg.dev/proj1cc-493515/rota-maravilhosa/prediction-service-uc9-uc10:latest']
+
+  # route_service_UC7
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'us-west4-docker.pkg.dev/proj1cc-493515/rota-maravilhosa/route-service-uc7:latest', '-f', 'route_service_UC7/Dockerfile', '.']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-west4-docker.pkg.dev/proj1cc-493515/rota-maravilhosa/route-service-uc7:latest']
+
+images:
+  - 'us-west4-docker.pkg.dev/proj1cc-493515/rota-maravilhosa/api-gateway:latest'
+  - 'us-west4-docker.pkg.dev/proj1cc-493515/rota-maravilhosa/data-service-uc4:latest'
+  - 'us-west4-docker.pkg.dev/proj1cc-493515/rota-maravilhosa/data-service-uc123:latest'
+  - 'us-west4-docker.pkg.dev/proj1cc-493515/rota-maravilhosa/data-service-uc8-uc11:latest'
+  - 'us-west4-docker.pkg.dev/proj1cc-493515/rota-maravilhosa/dataset-service:latest'
+  - 'us-west4-docker.pkg.dev/proj1cc-493515/rota-maravilhosa/prediction-service-uc5-uc6:latest'
+  - 'us-west4-docker.pkg.dev/proj1cc-493515/rota-maravilhosa/prediction-service-uc9-uc10:latest'
+  - 'us-west4-docker.pkg.dev/proj1cc-493515/rota-maravilhosa/route-service-uc7:latest'
+
+options:
+  machineType: 'E2_HIGHCPU_8'

@@ -14,3 +14,4 @@ data:
   PREDICTION_SERVICE_URL: "http://prediction-service-uc5-uc6:8002"
   PREDICTION_SERVICE_UC9_UC10_URL: "http://prediction-service-uc9-uc10:8008"
   ROUTE_SERVICE_URL: "http://route-service-uc7:8003"
+  DATASET_SERVICE_URL: "http://dataset-service:8005"   
