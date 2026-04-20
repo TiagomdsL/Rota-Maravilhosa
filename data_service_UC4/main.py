@@ -1,16 +1,27 @@
-# data_service/main.py
 import os
-from typing import List
+import json
+import logging
 from fastapi import FastAPI
 from pydantic import BaseModel
-from dataset_service.repository import get_dataset
-from dataset_service.loader import load_dataset
-import pandas as pd
+from typing import List
+from google.cloud import bigquery
+from google.oauth2 import service_account
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 app = FastAPI()
 
-dataset_path = os.path.join("dataset", "US_Accidents_sample.csv")
-load_dataset(dataset_path)
+PROJECT = "proj1cc-493515"
+TABLE = "proj1cc-493515.accidents.accidents"
+LOCATION = "US"
+
+def get_client():
+    api_token = os.environ.get("API_TOKEN")
+    if api_token:
+        credentials = service_account.Credentials.from_service_account_info(
+            json.loads(api_token))
+        return bigquery.Client(credentials=credentials, project=PROJECT, location=LOCATION)
+    return bigquery.Client(project=PROJECT, location=LOCATION)
 
 class Accident(BaseModel):
     latitude: float
@@ -22,60 +33,66 @@ class BoundingBoxResponse(BaseModel):
 
 @app.get("/health")
 async def health():
-    return {"gateway": "ok"}
+    return {"status": "ok"}
+
+@app.get("/ready")
+async def ready():
+    return {"status": "ok"}
 
 @app.post("/features")
 def get_location_features(payload: dict):
-    """
-    Retorna features históricas de acidentes para PredictionService.
-    Input: latitude, longitude, timestamp
-    """
-    df = get_dataset()
+    from datetime import datetime
     latitude = payload["latitude"]
     longitude = payload["longitude"]
-    timestamp = pd.to_datetime(payload["timestamp"])
-    hour = timestamp.hour
+    hour = datetime.fromisoformat(payload["timestamp"]).hour
 
-    # Filtrar acidentes próximos (±0.01 graus ~1 km)
-    nearby = df[
-        (df["latitude"].between(latitude - 0.01, latitude + 0.01)) &
-        (df["longitude"].between(longitude - 0.01, longitude + 0.01))
-    ]
-    nearby["hour"] = nearby["start_time"].dt.hour
-    nearby = nearby[nearby["hour"] == hour]
+    client = get_client()
+    sql = f"""
+        SELECT
+            COUNT(*) as total_accidents,
+            AVG(Severity) as avg_severity,
+            AVG(Visibility_mi_) as avg_visibility,
+            AVG(Precipitation_in_) as avg_precipitation
+        FROM `{TABLE}`
+        WHERE Start_Lat BETWEEN {latitude-0.01} AND {latitude+0.01}
+        AND Start_Lng BETWEEN {longitude-0.01} AND {longitude+0.01}
+        AND EXTRACT(HOUR FROM Start_Time) = {hour}
+    """
+    row = list(client.query(sql).result())[0]
 
-    total_accidents = len(nearby)
-    avg_severity = nearby["severity"].mean() if total_accidents > 0 else 0
-
-    # Condições ambientais médias
-    avg_visibility = nearby["visibility"].mean() if "visibility" in nearby else None
-    avg_precipitation = nearby["precipitation"].mean() if "precipitation" in nearby else None
-    weather_counts = nearby["weather_condition"].value_counts().to_dict()
+    weather_sql = f"""
+        SELECT Weather_Condition, COUNT(*) as cnt
+        FROM `{TABLE}`
+        WHERE Start_Lat BETWEEN {latitude-0.01} AND {latitude+0.01}
+        AND Start_Lng BETWEEN {longitude-0.01} AND {longitude+0.01}
+        AND EXTRACT(HOUR FROM Start_Time) = {hour}
+        GROUP BY Weather_Condition
+    """
+    weather_dist = {r["Weather_Condition"]: r["cnt"]
+                   for r in client.query(weather_sql).result()
+                   if r["Weather_Condition"]}
 
     return {
-        "total_accidents": total_accidents,
-        "avg_severity": round(avg_severity, 2),
-        "avg_visibility": avg_visibility,
-        "avg_precipitation": avg_precipitation,
-        "weather_distribution": weather_counts
+        "total_accidents": row["total_accidents"],
+        "avg_severity": round(row["avg_severity"] or 0, 2),
+        "avg_visibility": row["avg_visibility"],
+        "avg_precipitation": row["avg_precipitation"],
+        "weather_distribution": weather_dist
     }
 
 @app.get("/accidents/bounding-box", response_model=BoundingBoxResponse)
 def get_accidents_bounding_box(
-    min_lat: float,
-    max_lat: float,
-    min_lon: float,
-    max_lon: float,
-    limit: int = 100 
+    min_lat: float, max_lat: float,
+    min_lon: float, max_lon: float,
+    limit: int = 100
 ):
-    df = get_dataset()
-
-    filtered = df[
-        (df["latitude"].between(min_lat, max_lat)) &
-        (df["longitude"].between(min_lon, max_lon))
-    ]
-    result = filtered[["latitude", "longitude", "severity"]].head(limit)
-
-    return {
-        "accidents": result.to_dict(orient="records")
-    }
+    client = get_client()
+    sql = f"""
+        SELECT Start_Lat as latitude, Start_Lng as longitude, Severity as severity
+        FROM `{TABLE}`
+        WHERE Start_Lat BETWEEN {min_lat} AND {max_lat}
+        AND Start_Lng BETWEEN {min_lon} AND {max_lon}
+        LIMIT {limit}
+    """
+    rows = [dict(r) for r in client.query(sql).result()]
+    return {"accidents": rows}

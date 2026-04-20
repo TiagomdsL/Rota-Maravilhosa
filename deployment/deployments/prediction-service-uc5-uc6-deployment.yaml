@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
       - name: prediction-service
-        image: europe-west1-docker.pkg.dev/PROJECT/rota-maravilhosa/prediction-service-uc5-uc6:latest
+        image: us-west4-docker.pkg.dev/proj1cc-493515/rota-maravilhosa/prediction-service-uc5-uc6:latest
         ports:
         - containerPort: 8002
         resources:
@@ -50,6 +50,12 @@ spec:
           initialDelaySeconds: 0
           periodSeconds: 10
           failureThreshold: 36
+        env:
+        - name: API_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: bq-secret
+              key: API_TOKEN
         envFrom:
         - configMapRef:
             name: rota-maravilhosa-config

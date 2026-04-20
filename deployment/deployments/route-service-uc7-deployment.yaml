@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
       - name: route-service
-        image: europe-west1-docker.pkg.dev/PROJECT/rota-maravilhosa/route-service-uc7:latest
+        image: us-west4-docker.pkg.dev/proj1cc-493515/rota-maravilhosa/route-service-uc7:latest
         ports:
         - containerPort: 8003
         resources:
