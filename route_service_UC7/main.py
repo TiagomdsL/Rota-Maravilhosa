@@ -127,7 +127,6 @@ def _risk_label(score: float) -> str:
     else:
         return "High"
 
-
-@app.get("/health")
-async def health():
+@app.get("/ready")
+async def ready():
     return {"status": "ok"}
