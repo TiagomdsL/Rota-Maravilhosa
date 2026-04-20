@@ -20,16 +20,16 @@ spec:
     spec:
       containers:
       - name: data-service-uc123
-        image: europe-west1-docker.pkg.dev/proj1CC/rota-maravilhosa/data-service-uc123:latest
+        image: us-west4-docker.pkg.dev/proj1cc-493515/rota-maravilhosa/data-service-uc123:latest
         ports:
         - containerPort: 8004
         resources:
           requests:
             cpu: "50m"
-            memory: "64Mi"
+            memory: "512Mi"
           limits:
             cpu: "200m"
-            memory: "128Mi"
+            memory: "2Gi"
         livenessProbe:
           httpGet:
             path: /health
@@ -42,6 +42,12 @@ spec:
             port: 8004
           initialDelaySeconds: 5
           periodSeconds: 10
+        env:
+        - name: API_TOKEN
+          valueFrom:
+            secretKeyRef:
+              key: API_TOKEN
+              name: bq-secret
         envFrom:
         - configMapRef:
             name: rota-maravilhosa-config
