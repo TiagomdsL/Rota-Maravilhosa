@@ -1,18 +1,8 @@
-FROM python:3.11-slim
-
+FROM python:3.10-slim
 WORKDIR /app
-
-# dependências para pandas
-RUN apt-get update && apt-get install -y \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY requirements.txt .
-
+COPY prediction_service_UC9_UC10/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-
+COPY dataset_service/ ./dataset_service/
+COPY prediction_service_UC9_UC10/main.py .
 EXPOSE 8008
-
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8008"]

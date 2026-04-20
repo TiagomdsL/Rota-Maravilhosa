@@ -1,41 +1,33 @@
+import os
+import json
+import logging
 from fastapi import FastAPI, Query
-import pandas as pd
-from functools import lru_cache
 from typing import Optional
+from google.cloud import bigquery
+from google.oauth2 import service_account
 
-from prediction_service_UC9_UC10.main import STATS
-
+logging.basicConfig(level=logging.INFO)
 app = FastAPI()
 
-DATA_PATH = "../dataset/US_Accidents_March23.csv"
-_dataset_cache = None
+PROJECT = "proj1cc-493515"
+TABLE = "proj1cc-493515.accidents.accidents"
+LOCATION = "US"
 
-def load_data():
-    """
-    Carrega o dataset com cache simples.
-    A primeira chamada carrega o CSV, as subsequentes usam o cache.
-    """
-    global _dataset_cache
-    
-    if _dataset_cache is None:
-        # Carrega apenas colunas necessárias para performance
-        required_columns = [
-            'City', 'County', 'State', 'Severity', 'ID', 
-            'Start_Lat', 'Start_Lng'
-        ]
-        
-        try:
-            _dataset_cache = pd.read_csv(
-                DATA_PATH,
-                usecols=required_columns,
-                low_memory=False
-            )
-        except ValueError:
-            # Se algumas colunas não existirem, carrega todas
-            _dataset_cache = pd.read_csv(DATA_PATH, low_memory=False)
-    
-    return _dataset_cache
+def get_client():
+    api_token = os.environ.get("API_TOKEN")
+    if api_token:
+        credentials = service_account.Credentials.from_service_account_info(
+            json.loads(api_token))
+        return bigquery.Client(credentials=credentials, project=PROJECT, location=LOCATION)
+    return bigquery.Client(project=PROJECT, location=LOCATION)
 
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+@app.get("/ready")
+async def ready():
+    return {"status": "ok"}
 
 @app.get("/hotspots")
 def get_hotspots(
@@ -43,32 +35,30 @@ def get_hotspots(
     state: Optional[str] = Query(None),
     limit: int = 10
 ):
-    df = load_data()
-    
+    filters = []
     if city:
-        df = df[df["City"] == city]
-    
+        filters.append(f"City = '{city}'")
     if state:
-        df = df[df["State"] == state]
-    
-    grouped = df.groupby(["Start_Lat", "Start_Lng"]).size().reset_index(name="count")
-    result = grouped.sort_values("count", ascending=False).head(limit)
-    
-    return result.to_dict(orient="records")
-
+        filters.append(f"State = '{state}'")
+    where = "WHERE " + " AND ".join(filters) if filters else ""
+    client = get_client()
+    sql = f"""
+        SELECT Start_Lat, Start_Lng, COUNT(*) as count
+        FROM `{TABLE}` {where}
+        GROUP BY Start_Lat, Start_Lng
+        ORDER BY count DESC
+        LIMIT {limit}
+    """
+    return [dict(r) for r in client.query(sql).result()]
 
 @app.get("/county-comparison")
 def county_comparison(state: str):
-    df = load_data()
-    df = df[df["State"] == state]
-    
-    grouped = df.groupby("County").agg(
-        accident_count=("ID", "count"),
-        avg_severity=("Severity", "mean")
-    ).reset_index()
-    
-    return grouped.to_dict(orient="records")
-
-@app.get("/health")
-async def health():
-    return {"gateway": "ok"}
+    client = get_client()
+    sql = f"""
+        SELECT County, COUNT(ID) as accident_count, AVG(Severity) as avg_severity
+        FROM `{TABLE}`
+        WHERE State = '{state}'
+        GROUP BY County
+        ORDER BY accident_count DESC
+    """
+    return [dict(r) for r in client.query(sql).result()]
