@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional  
-from fastapi import FastAPI, HTTPException, Query, logger
+from fastapi import FastAPI, HTTPException, Query, logger, Request
 from pydantic import BaseModel
 import httpx
 import os
@@ -74,9 +74,9 @@ async def forward_request(
 async def health():
     return {"gateway": "ok"}
 
-@app.route('/ready')
-def ready():
-    return {"status": "ready"}, 200
+@app.get("/ready")
+async def ready(request: Request):
+    return {"status": "ready"}
 
 @app.post("/accidents/predict-severity")
 async def gateway_predict_severity(input_data: SeverityInput):

@@ -30,31 +30,31 @@ spec:
           limits:
             cpu: "500m"
             memory: "256Mi"
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8000
-            initialDelaySeconds: 30
-            periodSeconds: 10
-          readinessProbe:
-            httpGet:
-              path: /ready
-              port: 8000
-            initialDelaySeconds: 5
-            periodSeconds: 5
-          envFrom:
-          - configMapRef:
-              name: rota-maravilhosa-config
-          env:
-          - name: DATA_SERVICE_URL
-            value: "http://data-service-uc4:8001"
-          - name: DATA_SERVICE_UC8_UC11_URL
-            value: "http://data-service-uc8-uc11:8007"
-          - name: DATA_SERVICE_URL_UC123
-            value: "http://data-service-uc123:8004"
-          - name: PREDICTION_SERVICE_URL
-            value: "http://prediction-service-uc5-uc6:8002"
-          - name: PREDICTION_SERVICE_UC9_UC10_URL
-            value: "http://prediction-service-uc9-uc10:8008"
-          - name: ROUTE_SERVICE_URL
-            value: "http://route-service-uc7:8003"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        envFrom:
+        - configMapRef:
+            name: rota-maravilhosa-config
+        env:
+        - name: DATA_SERVICE_URL
+          value: "http://data-service-uc4:8001"
+        - name: DATA_SERVICE_UC8_UC11_URL
+          value: "http://data-service-uc8-uc11:8007"
+        - name: DATA_SERVICE_URL_UC123
+          value: "http://data-service-uc123:8004"
+        - name: PREDICTION_SERVICE_URL
+          value: "http://prediction-service-uc5-uc6:8002"
+        - name: PREDICTION_SERVICE_UC9_UC10_URL
+          value: "http://prediction-service-uc9-uc10:8008"
+        - name: ROUTE_SERVICE_URL
+          value: "http://route-service-uc7:8003"
