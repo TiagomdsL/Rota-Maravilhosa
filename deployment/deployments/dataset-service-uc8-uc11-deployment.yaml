@@ -17,6 +17,10 @@ spec:
     metadata:
       labels:
         app: data-service-uc8-uc11
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8007"
+        prometheus.io/path: "/metrics"
     spec:
       containers:
       - name: data-service-uc8-uc11

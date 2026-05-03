@@ -19,6 +19,7 @@ kubectl apply -f "$KUBERNETES_DIR/namespace.yaml"
 
 echo "[2/7] Aplicando ConfigMap..."
 kubectl apply -f "$KUBERNETES_DIR/configmap.yaml" -n "$NAMESPACE"
+kubectl apply -f "$KUBERNETES_DIR/prometheus_configmap.yaml" -n "$NAMESPACE"
 
 echo "[3/7] Aplicando Secrets..."
 if [ -f "$KUBERNETES_DIR/secrets.yaml" ]; then
