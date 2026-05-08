@@ -14,33 +14,43 @@ for dir in "$KUBERNETES_DIR" "$DEPLOYMENTS_DIR" "$SERVICES_DIR"; do
     fi
 done
 
-echo "[1/7] Criando namespace..."
+echo "[1/10] Criando namespace..."
 kubectl apply -f "$KUBERNETES_DIR/namespace.yaml"
 
-echo "[2/7] Aplicando ConfigMap..."
+echo "[2/10] Aplicando NetworkPolicy (default-deny)..."
+kubectl apply -f "$KUBERNETES_DIR/networkpolicy.yaml" -n "$NAMESPACE"
+
+echo "[3/10] Criando Secret do BigQuery..."
+kubectl create secret generic bq-secret \
+    --namespace=$NAMESPACE \
+    --from-literal=API_TOKEN="$BIGQUERY_API_TOKEN" \
+    --dry-run=client -o yaml | kubectl apply -f -
+echo "✓ Secret bq-secret criada"
+
+echo "[4/10] Aplicando ConfigMap..."
 kubectl apply -f "$KUBERNETES_DIR/configmap.yaml" -n "$NAMESPACE"
 kubectl apply -f "$KUBERNETES_DIR/prometheus_configmap.yaml" -n "$NAMESPACE"
 
-echo "[3/7] Aplicando Secrets..."
+echo "[5/10] Aplicando Secrets..."
 if [ -f "$KUBERNETES_DIR/secrets.yaml" ]; then
     kubectl apply -f "$KUBERNETES_DIR/secrets.yaml" -n "$NAMESPACE"
 else
     echo "   (secrets.yaml não encontrado - a saltar)"
 fi
 
-echo "[4/7] Aplicando Services..."
+echo "[6/10] Aplicando Services..."
 for svc in $(ls "$SERVICES_DIR"/*.yaml | sort); do
     echo "   - $(basename "$svc")"
     kubectl apply -f "$svc" -n "$NAMESPACE"
 done
 
-echo "[5/7] Aplicando Deployments..."
+echo "[7/10] Aplicando Deployments..."
 for deploy in $(ls "$DEPLOYMENTS_DIR"/*.yaml | sort); do
     echo "   - $(basename "$deploy")"
     kubectl apply -f "$deploy" -n "$NAMESPACE"
 done
 
-echo "[6/7] Aguardando pods ficarem prontos..."
+echo "[8/10] Aguardando pods ficarem prontos..."
 if ! kubectl wait --for=condition=ready pod --all -n "$NAMESPACE" --timeout=300s; then
     echo "ERRO: Pods não ficaram prontos. Estado actual:"
     kubectl get pods -n "$NAMESPACE"
@@ -48,7 +58,7 @@ if ! kubectl wait --for=condition=ready pod --all -n "$NAMESPACE" --timeout=300s
     exit 1
 fi
 
-echo "[7/7] Aplicando HPA e Ingress..."
+echo "[9/10] Aplicando HPA e Ingress..."
 kubectl apply -f "$KUBERNETES_DIR/horizontalpodautoscalers.yaml" -n "$NAMESPACE"
 kubectl apply -f "$KUBERNETES_DIR/ingress.yaml" -n "$NAMESPACE"
 
