@@ -1,7 +1,9 @@
 import os
 import json
 import logging
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query, Response, Request
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+import time
 from pydantic import BaseModel, Field
 from typing import List
 from google.cloud import bigquery
@@ -14,6 +16,50 @@ app = FastAPI(title="Accident Prediction Service", version="1.0.0")
 PROJECT = "proj1cc-493515"
 TABLE = "proj1cc-493515.accidents.accidents"
 LOCATION = "US"
+
+REQUEST_COUNT = Counter(
+    "requests_total",
+    "Total requests",
+    ["service", "endpoint"]
+)
+
+REQUEST_LATENCY = Histogram(
+    "request_latency_seconds",
+    "Request latency",
+    ["service"]
+)
+
+ERROR_COUNT = Counter(
+    "requests_errors_total",
+    "Total errors",
+    ["service"]
+)
+
+SERVICE_NAME = "prediction-service-uc9-uc10"
+
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    start = time.time()
+    try:
+        response = await call_next(request)
+
+        REQUEST_COUNT.labels(
+            service=SERVICE_NAME,
+            endpoint=request.url.path
+        ).inc()
+
+        if response.status_code >= 400:
+            ERROR_COUNT.labels(service=SERVICE_NAME).inc()
+
+        return response
+
+    finally:
+        duration = time.time() - start
+        REQUEST_LATENCY.labels(service=SERVICE_NAME).observe(duration)
+
+@app.get("/metrics")
+def metrics():
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 def get_client():
     api_token = os.environ.get("API_TOKEN")

@@ -17,6 +17,10 @@ spec:
     metadata:
       labels:
         app: route-service-uc7
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8003"
+        prometheus.io/path: "/metrics"
     spec:
       securityContext:  # Pod level security context
         runAsNonRoot: true

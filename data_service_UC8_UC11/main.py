@@ -1,12 +1,12 @@
 import os
 import json
 import logging
-from fastapi import FastAPI, Query, Response, Request
 from typing import Optional
 from google.cloud import bigquery
 from google.oauth2 import service_account
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 import time
+from fastapi import FastAPI, Query, Response, Request
 
 logging.basicConfig(level=logging.INFO)
 app = FastAPI()

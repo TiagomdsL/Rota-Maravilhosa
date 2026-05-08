@@ -1,7 +1,9 @@
 import os
 import json
 import logging
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Response, Request
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+import time
 from typing import Optional
 from google.cloud import bigquery
 from google.oauth2 import service_account
@@ -26,6 +28,50 @@ STATE_NAMES = {
     "VA":"Virginia","WA":"Washington","WV":"West Virginia","WI":"Wisconsin","WY":"Wyoming"
 }
 NAME_TO_CODE = {v: k for k, v in STATE_NAMES.items()}
+
+REQUEST_COUNT = Counter(
+    "requests_total",
+    "Total requests",
+    ["service", "endpoint"]
+)
+
+REQUEST_LATENCY = Histogram(
+    "request_latency_seconds",
+    "Request latency",
+    ["service"]
+)
+
+ERROR_COUNT = Counter(
+    "requests_errors_total",
+    "Total errors",
+    ["service"]
+)
+
+SERVICE_NAME = "data-service-uc123"
+
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    start = time.time()
+    try:
+        response = await call_next(request)
+
+        REQUEST_COUNT.labels(
+            service=SERVICE_NAME,
+            endpoint=request.url.path
+        ).inc()
+
+        if response.status_code >= 400:
+            ERROR_COUNT.labels(service=SERVICE_NAME).inc()
+
+        return response
+
+    finally:
+        duration = time.time() - start
+        REQUEST_LATENCY.labels(service=SERVICE_NAME).observe(duration)
+
+@app.get("/metrics")
+def metrics():
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 def get_client():
     api_token = os.environ.get("API_TOKEN")

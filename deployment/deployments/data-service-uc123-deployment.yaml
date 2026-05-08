@@ -17,6 +17,10 @@ spec:
     metadata:
       labels:
         app: data-service-uc123
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8004"
+        prometheus.io/path: "/metrics"
     spec:
       securityContext:  
         runAsNonRoot: true

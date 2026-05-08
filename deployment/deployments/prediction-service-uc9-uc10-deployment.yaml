@@ -17,6 +17,10 @@ spec:
     metadata:
       labels:
         app: prediction-service-uc9-uc10
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8008"
+        prometheus.io/path: "/metrics"
     spec:
       securityContext:  # Pod level security context
         runAsNonRoot: true
