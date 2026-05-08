@@ -18,11 +18,23 @@ spec:
       labels:
         app: data-service-uc4
     spec:
+      securityContext:  
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
       - name: data-service-uc4
         image: us-west4-docker.pkg.dev/proj1cc-493515/rota-maravilhosa/data-service-uc4:latest
         ports:
         - containerPort: 8001
+        securityContext:  
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
         resources:
           requests:
             cpu: "50m"
@@ -51,10 +63,4 @@ spec:
         envFrom:
         - configMapRef:
             name: rota-maravilhosa-config
-#        volumeMounts:
-#        - name: dataset
-#          mountPath: /data
-#      volumes:  #rever consoante o tipo de armazenamento de dados escolhido
-#      - name: dataset
-#        persistentVolumeClaim:
-#          claimName: dataset-pvc
+  

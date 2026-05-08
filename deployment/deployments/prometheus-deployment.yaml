@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: prometheus
+  namespace: rota-maravilhosa
 spec:
   replicas: 1
   selector:
@@ -12,17 +13,42 @@ spec:
       labels:
         app: prometheus
     spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: prometheus
-          image: prom/prometheus
+          image: prom/prometheus:latest
           args:
             - "--config.file=/etc/prometheus/prometheus.yml"
+            - "--storage.tsdb.path=/prometheus"
           ports:
             - containerPort: 9090
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+              - ALL
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
           volumeMounts:
-            - name: config-volume
-              mountPath: /etc/prometheus/
+            - name: config
+              mountPath: /etc/prometheus/prometheus.yml
+              subPath: prometheus.yml
+            - name: storage
+              mountPath: /prometheus
       volumes:
-        - name: config-volume
+        - name: config
           configMap:
             name: prometheus-cm
+        - name: storage
+          emptyDir: {}

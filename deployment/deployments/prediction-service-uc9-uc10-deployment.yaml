@@ -18,11 +18,23 @@ spec:
       labels:
         app: prediction-service-uc9-uc10
     spec:
+      securityContext:  # Pod level security context
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
       - name: prediction-service-uc9-uc10
         image: us-west4-docker.pkg.dev/proj1cc-493515/rota-maravilhosa/prediction-service-uc9-uc10:latest
         ports:
         - containerPort: 8008
+        securityContext:  # Container level security context
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
         resources:
           requests:
             cpu: "150m"

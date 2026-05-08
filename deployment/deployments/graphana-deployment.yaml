@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: grafana
+  namespace: rota-maravilhosa
 spec:
   replicas: 1
   selector:
@@ -12,8 +13,33 @@ spec:
       labels:
         app: grafana
     spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
-        - name: grafana
-          image: grafana/grafana
-          ports:
-            - containerPort: 3000
+      - name: grafana
+        image: grafana/grafana:latest
+        ports:
+        - containerPort: 3000
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 472
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+        volumeMounts:
+        - name: storage
+          mountPath: /var/lib/grafana
+      volumes:
+      - name: storage
+        emptyDir: {}

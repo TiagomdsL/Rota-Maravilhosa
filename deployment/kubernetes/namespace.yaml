@@ -6,3 +6,7 @@ metadata:
     environment: production
     name: rota-maravilhosa
     app.kubernetes.io/managed-by: kubectl
+    pod-security.kubernetes.io/enforce: restricted 
+    pod-security.kubernetes.io/audit: restricted 
+    pod-security.kubernetes.io/warn: restricted
+  

@@ -9,8 +9,31 @@ echo "========================================="
 echo "Build e Deploy da Rota Maravilhosa"
 echo "========================================="
 
-echo "[1/4] Habilitando APIs..."
-gcloud services enable cloudbuild.googleapis.com artifactregistry.googleapis.com --project $PROJECT
+enable_api() {
+    local api=$1
+    local max_retries=5
+    local retry_delay=5
+    
+    for i in $(seq 1 $max_retries); do
+        echo "Tentativa $i: Habilitando $api..."
+        if gcloud services enable "$api" --project $PROJECT 2>/dev/null; then
+            echo "✓ $api habilitada com sucesso"
+            return 0
+        else
+            if [ $i -lt $max_retries ]; then
+                echo "  Erro. Aguardando ${retry_delay}s antes de tentar novamente..."
+                sleep $retry_delay
+                retry_delay=$((retry_delay * 2))  # Exponential backoff
+            fi
+        fi
+    done
+    echo "✗ Falha ao habilitar $api após $max_retries tentativas"
+    return 1
+}
+
+# Habilitar APIs uma por uma
+enable_api "cloudbuild.googleapis.com"
+enable_api "artifactregistry.googleapis.com"
 
 echo "[2/4] Configurando permissões Cloud Build..."
 PROJECT_NUMBER=$(gcloud projects describe $PROJECT --format="value(projectNumber)")
