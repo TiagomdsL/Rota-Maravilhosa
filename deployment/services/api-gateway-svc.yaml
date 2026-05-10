@@ -4,6 +4,7 @@ metadata:
   name: api-gateway
   namespace: rota-maravilhosa
 spec:
+  type: LoadBalancer  
   selector:
     app: api-gateway
   ports:
