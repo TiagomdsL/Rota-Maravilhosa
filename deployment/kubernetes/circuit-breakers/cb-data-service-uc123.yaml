@@ -1,0 +1,20 @@
+
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: cb-data-service-uc123
+  namespace: rota-maravilhosa
+spec:
+  host: data-service-uc123
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 15
+      http:
+        http1MaxPendingRequests: 30
+        maxRequestsPerConnection: 10
+        maxRetries: 2
+    outlierDetection:
+      consecutive5xxErrors: 3
+      interval: 20s
+      baseEjectionTime: 30s

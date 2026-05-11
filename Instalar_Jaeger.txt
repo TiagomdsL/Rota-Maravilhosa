@@ -42,11 +42,11 @@ interface
 http://localhost:16686
 
 comandos de logs:
-# Verificar se os pods estão rodando
+# Verificar se os pods 
 kubectl get pods -n observability
 kubectl get pods -n rota-maravilhosa
 
-# Verificar logs do Collector (para ver se está recebendo traces)
+# Verificar logs do Collector (para ver se está a receber traces)
 kubectl logs -n observability -l app=otel-collector --tail=50
 
 # Verificar logs de um serviço (para ver o trace_id)

@@ -1,0 +1,33 @@
+# Verificar se o Istio está instalado no cluster
+kubectl get pods -n istio-system
+
+# Verificar se os namespaces têm sidecar injection ativado
+kubectl get namespace -L istio-injection
+
+# instalar manualmente
+# Download do Istio
+curl -L https://istio.io/downloadIstio | sh -
+
+# Mover para a pasta (o nome da pasta pode variar, ex: istio-1.24.0)
+cd istio-*
+
+# Adicionar istioctl ao PATH
+export PATH=$PWD/bin:$PATH
+
+# Instalar
+istioctl install --set profile=default -y
+
+# Verificar
+kubectl get pods -n istio-system
+
+# 2. Ativar sidecar injection (1 comando)
+kubectl label namespace rota-maravilhosa istio-injection=enabled --overwrite
+
+# 3. Aplicar Circuit Breakers (se já tiver os arquivos YAML)
+kubectl apply -f deployments/kubernetes/circuit-breakers/
+
+# 4. Reinstalar serviços (1 comando)
+kubectl rollout restart deployment -n rota-maravilhosa
+
+# 5. Verificar (deve mostrar 2/2)
+kubectl get pods -n rota-maravilhosa
