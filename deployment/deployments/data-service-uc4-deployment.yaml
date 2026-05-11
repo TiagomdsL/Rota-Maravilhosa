@@ -59,6 +59,8 @@ spec:
           initialDelaySeconds: 5
           periodSeconds: 10
         env:
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://otel-collector.observability:4318/v1/traces"
         - name: API_TOKEN
           valueFrom:
             secretKeyRef:
@@ -67,4 +69,3 @@ spec:
         envFrom:
         - configMapRef:
             name: rota-maravilhosa-config
-  

@@ -10,8 +10,13 @@ from pydantic import BaseModel
 from google.cloud import bigquery
 from google.oauth2 import service_account
 
+from tracing import setup_tracing, get_current_span
+
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 app = FastAPI(title="Prediction Service")
+setup_tracing(app, "prediction-service-uc5-uc6")
+
 DATA_SERVICE_URL = os.getenv("DATA_SERVICE_URL", "http://localhost:8001")
 
 PROJECT = "proj1cc-493515"
@@ -82,6 +87,7 @@ class RiskRequest(BaseModel):
 
 @app.get("/health")
 async def health():
+    logger.info("Health check")
     return {"status": "ok"}
 
 @app.get("/ready")
@@ -90,6 +96,13 @@ async def ready():
 
 @app.post("/predict-severity")
 def predict_severity(input_data: SeverityInput):
+    span = get_current_span()
+    span.set_attribute("business.visibility", input_data.visibility)
+    span.set_attribute("business.precipitation", input_data.precipitation)
+    span.set_attribute("business.weather_condition", input_data.weather_condition)
+    
+    logger.info(f"Predict severity: visibility={input_data.visibility}, precip={input_data.precipitation}")
+    
     client = get_client()
     sql = f"""
         SELECT AVG(Severity) as avg_severity
@@ -103,10 +116,22 @@ def predict_severity(input_data: SeverityInput):
     if avg is None:
         global_rows = list(client.query(f"SELECT AVG(Severity) as avg_severity FROM `{TABLE}`").result())
         avg = global_rows[0]["avg_severity"] if global_rows else 2.0
-    return {"predicted_severity": round(avg, 2)}
+    
+    result = {"predicted_severity": round(avg, 2)}
+    span.set_attribute("business.predicted_severity", result["predicted_severity"])
+    
+    logger.info(f"Predicted severity: {result['predicted_severity']}")
+    return result
 
 @app.post("/risk/score")
 async def calculate_risk_score(request: RiskRequest):
+    span = get_current_span()
+    span.set_attribute("business.latitude", request.latitude)
+    span.set_attribute("business.longitude", request.longitude)
+    span.set_attribute("business.timestamp", request.timestamp.isoformat())
+    
+    logger.info(f"Risk score for location: ({request.latitude}, {request.longitude})")
+    
     async with httpx.AsyncClient() as http_client:
         try:
             response = await http_client.post(
@@ -129,6 +154,12 @@ async def calculate_risk_score(request: RiskRequest):
     if features.get("avg_precipitation") and features["avg_precipitation"] > 0.1:
         prob = min(prob * 1.2, 1.0)
     severity = 1 if total == 0 or avg_severity == 0 else max(1, min(4, round(avg_severity)))
-    return {"accident_probability": round(prob, 4), "predicted_severity": severity,
+    
+    result = {"accident_probability": round(prob, 4), "predicted_severity": severity,
             "nearby_accidents_count": total}
-
+    
+    span.set_attribute("business.accident_probability", result["accident_probability"])
+    span.set_attribute("business.predicted_severity", result["predicted_severity"])
+    
+    logger.info(f"Risk score result: probability={prob}, severity={severity}")
+    return result

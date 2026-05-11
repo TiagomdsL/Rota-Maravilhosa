@@ -62,6 +62,8 @@ spec:
         - configMapRef:
             name: rota-maravilhosa-config
         env:
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://otel-collector.observability:4318/v1/traces"
         - name: DATA_SERVICE_URL
           value: "http://data-service-uc4:8001"
         - name: DATA_SERVICE_UC8_UC11_URL

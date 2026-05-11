@@ -1,12 +1,18 @@
 # route_service/main.py
 import os
 import httpx
+import logging
 from fastapi import FastAPI, HTTPException, Query, Response, Request
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 import time
 from pydantic import BaseModel
 
+from tracing import setup_tracing, get_current_span
+
 app = FastAPI(title="Route Service")
+setup_tracing(app, "route-service-uc7")
+
+logger = logging.getLogger(__name__)
 
 PREDICTION_SERVICE_URL = os.getenv("PREDICTION_SERVICE_URL", "http://localhost:8002")
 
@@ -54,7 +60,6 @@ async def metrics_middleware(request: Request, call_next):
 def metrics():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
-# Número de pontos intermédios entre origem e destino
 NUM_WAYPOINTS = 5
 
 class RouteRequest(BaseModel):
@@ -62,21 +67,13 @@ class RouteRequest(BaseModel):
     origin_lon: float
     destination_lat: float
     destination_lon: float
-    timestamp: str = "2016-02-08T08:00:00"  # default para testes
-
-
-# ── Helpers ────────────────────────────────────────────────────────────────────
+    timestamp: str = "2016-02-08T08:00:00"
 
 def interpolate_waypoints(
     origin_lat: float, origin_lon: float,
     destination_lat: float, destination_lon: float,
     n: int = NUM_WAYPOINTS
 ) -> list[dict]:
-    """
-    Gera n pontos intermédios entre origem e destino por interpolação linear.
-    Inclui origem e destino.
-    Futuro: trocar por Google Routes API para waypoints reais.
-    """
     waypoints = []
     for i in range(n + 2):  
         t = i / (n + 1)
@@ -86,16 +83,12 @@ def interpolate_waypoints(
         })
     return waypoints
 
-
 async def get_risk_for_waypoint(
     client: httpx.AsyncClient,
     lat: float,
     lon: float,
     timestamp: str
 ) -> dict:
-    """
-    Chama o prediction_service para obter o risk score de um waypoint.
-    """
     try:
         response = await client.post(
             f"{PREDICTION_SERVICE_URL}/risk/score",
@@ -104,15 +97,9 @@ async def get_risk_for_waypoint(
         response.raise_for_status()
         return response.json()
     except httpx.HTTPError:
-        # Se falhar um waypoint, assume risco neutro para não bloquear a rota
         return {"accident_probability": 0.0, "predicted_severity": 1, "nearby_accidents_count": 0}
 
-
 def aggregate_risk(waypoint_scores: list[dict]) -> float:
-    """
-    Agrega os risk scores dos waypoints numa só métrica.
-    Usa média ponderada: accident_probability * predicted_severity normalizado.
-    """
     if not waypoint_scores:
         return 0.0
 
@@ -124,23 +111,29 @@ def aggregate_risk(waypoint_scores: list[dict]) -> float:
 
 @app.get("/health")
 async def health():
+    logger.info("Health check")
     return {"gateway": "ok"}
 
 @app.post("/route/analyze")
 async def analyze_route(request: RouteRequest):
-    """
-    UC7 – Route Risk Analysis.
-    Gera waypoints entre origem e destino, calcula o risco de cada um,
-    e devolve a rota com o risk score agregado.
-    """
+    span = get_current_span()
+    span.set_attribute("business.origin_lat", request.origin_lat)
+    span.set_attribute("business.origin_lon", request.origin_lon)
+    span.set_attribute("business.destination_lat", request.destination_lat)
+    span.set_attribute("business.destination_lon", request.destination_lon)
+    
+    logger.info(f"Route analysis from ({request.origin_lat},{request.origin_lon}) to ({request.destination_lat},{request.destination_lon})")
+    
     waypoints = interpolate_waypoints(
         request.origin_lat, request.origin_lon,
         request.destination_lat, request.destination_lon
     )
+    
+    span.set_attribute("business.total_waypoints", len(waypoints))
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         scores = []
-        for wp in waypoints:
+        for i, wp in enumerate(waypoints):
             score = await get_risk_for_waypoint(
                 client, wp["latitude"], wp["longitude"], request.timestamp
             )
@@ -152,6 +145,12 @@ async def analyze_route(request: RouteRequest):
             })
 
     risk_score = aggregate_risk(scores)
+    risk_level = _risk_label(risk_score)
+    
+    span.set_attribute("business.risk_score", risk_score)
+    span.set_attribute("business.risk_level", risk_level)
+    
+    logger.info(f"Route analysis completed: risk_score={risk_score}, level={risk_level}")
 
     return {
         "recommended_route": {
@@ -160,10 +159,9 @@ async def analyze_route(request: RouteRequest):
             "waypoints": scores,
         },
         "risk_score": risk_score,
-        "risk_level": _risk_label(risk_score),
+        "risk_level": risk_level,
         "total_waypoints_analyzed": len(scores),
     }
-
 
 def _risk_label(score: float) -> str:
     if score < 0.2:

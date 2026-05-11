@@ -9,9 +9,12 @@ from typing import List
 from google.cloud import bigquery
 from google.oauth2 import service_account
 
+from tracing import setup_tracing, get_current_span
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 app = FastAPI()
+setup_tracing(app, "data-service-uc4")
 
 PROJECT = "proj1cc-493515"
 TABLE = "proj1cc-493515.accidents.accidents"
@@ -79,6 +82,7 @@ class BoundingBoxResponse(BaseModel):
 
 @app.get("/health")
 async def health():
+    logger.info("Health check")
     return {"status": "ok"}
 
 @app.get("/ready")
@@ -87,10 +91,19 @@ async def ready():
 
 @app.post("/features")
 def get_location_features(payload: dict):
+    span = get_current_span()
+    span.set_attribute("business.latitude", payload.get("latitude"))
+    span.set_attribute("business.longitude", payload.get("longitude"))
+    span.set_attribute("business.timestamp", payload.get("timestamp"))
+    
+    logger.info(f"Features request for location: ({payload.get('latitude')}, {payload.get('longitude')})")
+    
     from datetime import datetime
     latitude = payload["latitude"]
     longitude = payload["longitude"]
     hour = datetime.fromisoformat(payload["timestamp"]).hour
+
+    span.set_attribute("business.hour", hour)
 
     client = get_client()
     sql = f"""
@@ -118,13 +131,18 @@ def get_location_features(payload: dict):
                    for r in client.query(weather_sql).result()
                    if r["Weather_Condition"]}
 
-    return {
+    result = {
         "total_accidents": row["total_accidents"],
         "avg_severity": round(row["avg_severity"] or 0, 2),
         "avg_visibility": row["avg_visibility"],
         "avg_precipitation": row["avg_precipitation"],
         "weather_distribution": weather_dist
     }
+    
+    span.set_attribute("business.total_accidents", row["total_accidents"])
+    logger.info(f"Features result: {row['total_accidents']} accidents found")
+    
+    return result
 
 @app.get("/accidents/bounding-box", response_model=BoundingBoxResponse)
 def get_accidents_bounding_box(
@@ -132,6 +150,15 @@ def get_accidents_bounding_box(
     min_lon: float, max_lon: float,
     limit: int = 100
 ):
+    span = get_current_span()
+    span.set_attribute("business.min_lat", min_lat)
+    span.set_attribute("business.max_lat", max_lat)
+    span.set_attribute("business.min_lon", min_lon)
+    span.set_attribute("business.max_lon", max_lon)
+    span.set_attribute("business.limit", limit)
+    
+    logger.info(f"Bounding box: ({min_lat},{min_lon}) to ({max_lat},{max_lon}), limit={limit}")
+    
     client = get_client()
     sql = f"""
         SELECT Start_Lat as latitude, Start_Lng as longitude, Severity as severity
@@ -141,4 +168,6 @@ def get_accidents_bounding_box(
         LIMIT {limit}
     """
     rows = [dict(r) for r in client.query(sql).result()]
+    
+    logger.info(f"Bounding box returned {len(rows)} accidents")
     return {"accidents": rows}

@@ -67,12 +67,15 @@ spec:
           periodSeconds: 10
           failureThreshold: 36
         env:
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://otel-collector.observability:4318/v1/traces"
         - name: API_TOKEN
           valueFrom:
             secretKeyRef:
               name: bq-secret
               key: API_TOKEN
+        - name: DATA_SERVICE_URL
+          value: "http://data-service-uc4:8001"
         envFrom:
         - configMapRef:
             name: rota-maravilhosa-config
-      

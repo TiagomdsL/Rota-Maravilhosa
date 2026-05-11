@@ -8,13 +8,16 @@ from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_
 import time
 from fastapi import FastAPI, Query, Response, Request
 
+from tracing import setup_tracing, get_current_span
+
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 app = FastAPI()
+setup_tracing(app, "data-service-uc8-uc11")
 
 PROJECT = "proj1cc-493515"
 TABLE = "proj1cc-493515.accidents.accidents"
 LOCATION = "US"
-
 
 REQUEST_COUNT = Counter(
     "requests_total",
@@ -70,6 +73,7 @@ def get_client():
 
 @app.get("/health")
 async def health():
+    logger.info("Health check")
     return {"status": "ok"}
 
 @app.get("/ready")
@@ -82,6 +86,15 @@ def get_hotspots(
     state: Optional[str] = Query(None),
     limit: int = 10
 ):
+    span = get_current_span()
+    if city:
+        span.set_attribute("business.city", city)
+    if state:
+        span.set_attribute("business.state", state)
+    span.set_attribute("business.limit", limit)
+    
+    logger.info(f"Hotspots request: city={city}, state={state}, limit={limit}")
+    
     filters = []
     if city:
         filters.append(f"City = '{city}'")
@@ -96,10 +109,17 @@ def get_hotspots(
         ORDER BY count DESC
         LIMIT {limit}
     """
-    return [dict(r) for r in client.query(sql).result()]
+    result = [dict(r) for r in client.query(sql).result()]
+    logger.info(f"Hotspots returned {len(result)} locations")
+    return result
 
 @app.get("/county-comparison")
 def county_comparison(state: str):
+    span = get_current_span()
+    span.set_attribute("business.state", state)
+    
+    logger.info(f"County comparison request for state: {state}")
+    
     client = get_client()
     sql = f"""
         SELECT County, COUNT(ID) as accident_count, AVG(Severity) as avg_severity
@@ -108,4 +128,6 @@ def county_comparison(state: str):
         GROUP BY County
         ORDER BY accident_count DESC
     """
-    return [dict(r) for r in client.query(sql).result()]
+    result = [dict(r) for r in client.query(sql).result()]
+    logger.info(f"County comparison returned {len(result)} counties")
+    return result

@@ -1,0 +1,53 @@
+kubectl create namespace observability
+
+# Instalar o cert-manager (requisito para o Jaeger Operator)
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.2/cert-manager.yaml
+
+# Aguardar o cert-manager iniciar
+kubectl wait --namespace cert-manager --for=condition=ready pod --all --timeout=120s
+
+# Instalar o Jaeger Operator
+kubectl create -f https://github.com/jaegertracing/jaeger-operator/releases/download/v1.51.0/jaeger-operator.yaml -n observability
+
+# Aguardar o Operator iniciar
+kubectl wait --namespace observability --for=condition=ready pod -l name=jaeger-operator --timeout=60s
+
+# Criar a instância do Jaeger
+kubectl apply -n observability -f - <<EOF
+apiVersion: jaegertracing.io/v1
+kind: Jaeger
+metadata:
+  name: jaeger-traces
+spec:
+  strategy: allInOne
+  allInOne:
+    options:
+      log-level: info
+  ingress:
+    enabled: false
+  storage:
+    type: memory
+    options:
+      memory:
+        max-traces: 100000
+EOF
+
+
+aplicar e iniciar
+kubectl apply -f otel-collector.yaml
+kubectl port-forward -n observability svc/jaeger-traces-query 16686:16686
+
+
+interface 
+http://localhost:16686
+
+comandos de logs:
+# Verificar se os pods estão rodando
+kubectl get pods -n observability
+kubectl get pods -n rota-maravilhosa
+
+# Verificar logs do Collector (para ver se está recebendo traces)
+kubectl logs -n observability -l app=otel-collector --tail=50
+
+# Verificar logs de um serviço (para ver o trace_id)
+kubectl logs -n rota-maravilhosa deployment/api-gateway --tail=20

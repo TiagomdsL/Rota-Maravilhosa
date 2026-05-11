@@ -8,8 +8,12 @@ from typing import Optional
 from google.cloud import bigquery
 from google.oauth2 import service_account
 
+from tracing import setup_tracing, get_current_span
+
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 app = FastAPI(title="Data Service", version="1.0.0")
+setup_tracing(app, "data-service-uc123")
 
 PROJECT = "proj1cc-493515"
 TABLE = "proj1cc-493515.accidents.accidents"
@@ -91,6 +95,7 @@ def normalize_state(state: str) -> str:
 
 @app.get("/health")
 async def health():
+    logger.info("Health check")
     return {"status": "ok"}
 
 @app.get("/ready")
@@ -103,8 +108,17 @@ async def get_statistics(
     start_date: str = Query(...),
     end_date: str = Query(...)
 ):
+    span = get_current_span()
+    span.set_attribute("business.state", state)
+    span.set_attribute("business.start_date", start_date)
+    span.set_attribute("business.end_date", end_date)
+    
+    logger.info(f"Statistics request: state={state}, from={start_date}, to={end_date}")
+    
     try:
         state_code = normalize_state(state)
+        span.set_attribute("business.state_code", state_code)
+        
         client = get_client()
         sql = f"""
             SELECT COUNT(*) as total_accidents, AVG(Severity) as avg_severity
@@ -113,17 +127,32 @@ async def get_statistics(
             AND Start_Time BETWEEN '{start_date}' AND '{end_date}'
         """
         row = list(client.query(sql).result())[0]
-        return {
+        
+        result = {
             "state": state_code,
             "state_name": STATE_NAMES.get(state_code, state_code),
             "total_accidents": row["total_accidents"],
             "avg_severity": round(row["avg_severity"] or 0, 2)
         }
+        
+        span.set_attribute("business.total_accidents", row["total_accidents"])
+        logger.info(f"Statistics result: {result['total_accidents']} accidents, severity={result['avg_severity']}")
+        
+        return result
     except ValueError as e:
+        span.set_attribute("error", True)
+        span.set_attribute("error.message", str(e))
+        logger.error(f"Validation error: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/accidents/weather-analysis")
 async def weather_analysis(state: Optional[str] = Query(None)):
+    span = get_current_span()
+    if state:
+        span.set_attribute("business.state", state)
+    
+    logger.info(f"Weather analysis request for state: {state}")
+    
     try:
         where = f"WHERE State = '{normalize_state(state)}'" if state else ""
         client = get_client()
@@ -135,11 +164,15 @@ async def weather_analysis(state: Optional[str] = Query(None)):
             HAVING Weather_Condition IS NOT NULL
             ORDER BY accident_count DESC
         """
-        return [{"weather_condition": r["Weather_Condition"],
-                 "accident_count": int(r["accident_count"]),
-                 "avg_severity": round(r["avg_severity"] or 0, 2)}
-                for r in client.query(sql).result()]
+        result = [{"weather_condition": r["Weather_Condition"],
+                   "accident_count": int(r["accident_count"]),
+                   "avg_severity": round(r["avg_severity"] or 0, 2)}
+                  for r in client.query(sql).result()]
+        
+        logger.info(f"Weather analysis returned {len(result)} conditions")
+        return result
     except ValueError as e:
+        logger.error(f"Validation error: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/accidents/temporal-analysis")
@@ -147,6 +180,13 @@ async def temporal_analysis(
     city: str = Query(...),
     day_of_week: Optional[str] = Query(None)
 ):
+    span = get_current_span()
+    span.set_attribute("business.city", city)
+    if day_of_week:
+        span.set_attribute("business.day_of_week", day_of_week)
+    
+    logger.info(f"Temporal analysis for city: {city}, day: {day_of_week}")
+    
     day_filter = f"AND FORMAT_TIMESTAMP('%A', Start_Time) = '{day_of_week}'" if day_of_week else ""
     client = get_client()
     sql = f"""
@@ -158,4 +198,6 @@ async def temporal_analysis(
     """
     hour_map = {int(r["hour"]): int(r["accident_count"])
                 for r in client.query(sql).result()}
-    return [{"hour": h, "accident_count": hour_map.get(h, 0)} for h in range(24)]
+    result = [{"hour": h, "accident_count": hour_map.get(h, 0)} for h in range(24)]
+    logger.info(f"Temporal analysis completed for {city}")
+    return result
