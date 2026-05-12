@@ -27,7 +27,6 @@ def setup_tracing(app: FastAPI, service_name: str):
     
     exporter = OTLPSpanExporter(
         endpoint="http://otel-collector.observability.svc.cluster.local:4318/v1/traces",
-        #insecure=True
     )
     
     provider.add_span_processor(BatchSpanProcessor(exporter))
@@ -36,13 +35,13 @@ def setup_tracing(app: FastAPI, service_name: str):
     FastAPIInstrumentor.instrument_app(app)
     HTTPXClientInstrumentor().instrument()
     
-    for handler in logging.root.handlers:
-        handler.addFilter(TraceIdFilter())
-    
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - [trace_id=%(trace_id)s] - %(message)s'
     )
+    
+    for handler in logging.root.handlers:
+        handler.addFilter(TraceIdFilter())
     
     print(f"✅ OpenTelemetry configurado para: {service_name}")
 
