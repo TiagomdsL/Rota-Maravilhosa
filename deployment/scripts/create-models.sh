@@ -47,7 +47,86 @@ WHERE Start_Time IS NOT NULL
   AND Severity IS NOT NULL
 EOSQL
 
-echo "✅ Modelo de ocorrência criado!"
+echo " Modelo de ocorrência criado!"
+
+echo " Criando modelo de previsão de ocorrência 2..."
+bq query --use_legacy_sql=false << 'EOSQL'
+CREATE OR REPLACE MODEL `proj1cc-493515.accidents.occurrence_model2`
+OPTIONS(
+  model_type='logistic_reg',
+  input_label_cols=['has_accident']
+) AS
+
+SELECT
+  EXTRACT(HOUR FROM Start_Time) AS hour,
+  Start_Lat AS latitude,
+  Start_Lng AS longitude,
+  Weather_Condition AS weather_condition,
+
+  1 AS has_accident
+
+FROM `proj1cc-493515.accidents.accidents_data`
+WHERE Start_Time IS NOT NULL
+  AND Start_Lat IS NOT NULL
+  AND Start_Lng IS NOT NULL
+  AND Weather_Condition IS NOT NULL;
+EOSQL
+
+echo " Modelo de previsão de ocorrência 2 criado!"
+
+echo " Criando modelo de predição de severidade 2..."
+
+bq query --use_legacy_sql=false << 'EOSQL'
+CREATE OR REPLACE MODEL `proj1cc-493515.accidents.severity_model2`
+OPTIONS(
+  model_type='linear_reg',
+  input_label_cols=['Severity']
+) AS
+
+SELECT
+  Visibility_mi AS visibility,
+  Precipitation_in AS precipitation,
+  Weather_Condition AS weather_condition,
+  Severity
+
+FROM `proj1cc-493515.accidents.accidents_data`
+WHERE Visibility_mi IS NOT NULL
+  AND Precipitation_in IS NOT NULL
+  AND Weather_Condition IS NOT NULL
+  AND Severity IS NOT NULL;
+EOSQL
+
+echo " Modelo de predição de severidade 2 criado!"
+
+echo " Criando modelo de risco 2..."
+
+bq query --use_legacy_sql=false << 'EOSQL'
+CREATE OR REPLACE MODEL `proj1cc-493515.accidents.risk_model2`
+OPTIONS(
+  model_type='logistic_reg',
+  input_label_cols=['has_accident']
+) AS
+
+SELECT
+  EXTRACT(HOUR FROM Start_Time) AS hour,
+  EXTRACT(DAYOFWEEK FROM Start_Time) AS day_of_week,
+  EXTRACT(MONTH FROM Start_Time) AS month,
+
+  Start_Lat AS latitude,
+  Start_Lng AS longitude,
+
+  Weather_Condition AS weather_condition,
+
+  1 AS has_accident
+
+FROM `proj1cc-493515.accidents.accidents_data`
+WHERE Start_Time IS NOT NULL
+  AND Start_Lat IS NOT NULL
+  AND Start_Lng IS NOT NULL
+  AND Weather_Condition IS NOT NULL;
+EOSQL
+
+echo " Modelo de risco 2 criado!"
 
 echo ""
 echo "✅ Modelos criados com sucesso!"

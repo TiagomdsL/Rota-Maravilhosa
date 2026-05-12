@@ -109,87 +109,180 @@ async def health():
 async def ready():
     return {"status": "ok"}
 
-@app.post("/accidents/predict-occurrence", response_model=PredictResponse)
+@app.post(
+    "/accidents/predict-occurrence",
+    response_model=PredictResponse
+)
 def predict_occurrence(request: PredictRequest):
     span = get_current_span()
+
     span.set_attribute("business.latitude", request.latitude)
     span.set_attribute("business.longitude", request.longitude)
     span.set_attribute("business.hour", request.hour)
-    span.set_attribute("business.weather_condition", request.weather_condition)
-    
-    logger.info(f"Predict occurrence: lat={request.latitude}, lon={request.longitude}, hour={request.hour}")
-    
+    span.set_attribute(
+        "business.weather_condition",
+        request.weather_condition
+    )
+
+    logger.info(
+        f"Predict occurrence: lat={request.latitude}, "
+        f"lon={request.longitude}, hour={request.hour}"
+    )
+
     try:
         client = get_client()
+
         sql = f"""
-            SELECT COUNT(*) as total,
-            COUNTIF(EXTRACT(HOUR FROM Start_Time) = {request.hour}) as hour_count
-            FROM `{TABLE}`
-            WHERE LOWER(Weather_Condition) LIKE LOWER('%{request.weather_condition}%')
+        SELECT predicted_has_accident as accident_probability
+        FROM ML.PREDICT(
+          MODEL `proj1cc-493515.accidents.occurrence_model2`,
+          (
+            SELECT
+              {request.hour} as hour,
+              {request.latitude} as latitude,
+              {request.longitude} as longitude,
+              '{request.weather_condition}' as weather_condition
+          )
+        )
         """
-        row = list(client.query(sql).result())[0]
-        total = row["total"] or 1
-        prob = min(0.9, max(0.01, row["hour_count"] / total))
-        
-        result = PredictResponse(accident_probability=round(prob, 4), risk_level=classify_risk(prob))
-        span.set_attribute("business.accident_probability", result.accident_probability)
-        
-        logger.info(f"Prediction result: probability={prob}, level={result.risk_level}")
+
+        rows = list(client.query(sql).result())
+
+        prob = float(rows[0]["accident_probability"])
+
+        prob = min(0.9, max(0.01, prob))
+
+        result = PredictResponse(
+            accident_probability=round(prob, 4),
+            risk_level=classify_risk(prob)
+        )
+
+        span.set_attribute(
+            "business.accident_probability",
+            result.accident_probability
+        )
+
+        logger.info(
+            f"Prediction result: probability={prob}, "
+            f"level={result.risk_level}"
+        )
+
         return result
+
     except Exception as e:
         span.set_attribute("error", True)
         span.set_attribute("error.message", str(e))
+
         logger.error(f"Error in predict_occurrence: {str(e)}")
+
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/accidents/simulate-risk", response_model=SimulateResponse)
+
+@app.post(
+    "/accidents/simulate-risk",
+    response_model=SimulateResponse
+)
 def simulate_risk(request: SimulateRequest):
     span = get_current_span()
+
     span.set_attribute("business.latitude", request.latitude)
     span.set_attribute("business.longitude", request.longitude)
     span.set_attribute("business.hour", request.hour)
-    span.set_attribute("business.weather_condition", request.weather_condition)
-    span.set_attribute("business.road_topology", request.road_topology)
-    
-    logger.info(f"Simulate risk: lat={request.latitude}, hour={request.hour}, road={request.road_topology}")
-    
+    span.set_attribute(
+        "business.weather_condition",
+        request.weather_condition
+    )
+    span.set_attribute(
+        "business.road_topology",
+        request.road_topology
+    )
+
+    logger.info(
+        f"Simulate risk: lat={request.latitude}, "
+        f"hour={request.hour}, road={request.road_topology}"
+    )
+
     try:
-        road_factors = {'junction': 1.3, 'roundabout': 1.25, 'curve': 1.15,
-                       'traffic_signal': 1.1, 'straight': 0.9}
-        road_factor = road_factors.get(request.road_topology.lower(), 1.0)
-        
-        span.set_attribute("business.road_factor", road_factor)
-        
+        road_factors = {
+            'junction': 1.3,
+            'roundabout': 1.25,
+            'curve': 1.15,
+            'traffic_signal': 1.1,
+            'straight': 0.9
+        }
+
+        road_factor = road_factors.get(
+            request.road_topology.lower(),
+            1.0
+        )
+
+        span.set_attribute(
+            "business.road_factor",
+            road_factor
+        )
+
         client = get_client()
+
         sql = f"""
-            SELECT COUNT(*) as total,
-            COUNTIF(EXTRACT(HOUR FROM Start_Time) = {request.hour}) as hour_count
-            FROM `{TABLE}`
-            WHERE LOWER(Weather_Condition) LIKE LOWER('%{request.weather_condition}%')
+        SELECT predicted_has_accident as accident_probability
+        FROM ML.PREDICT(
+          MODEL `proj1cc-493515.accidents.occurrence_model2`,
+          (
+            SELECT
+              {request.hour} as hour,
+              {request.latitude} as latitude,
+              {request.longitude} as longitude,
+              '{request.weather_condition}' as weather_condition
+          )
+        )
         """
-        row = list(client.query(sql).result())[0]
-        total = row["total"] or 1
-        base_prob = min(0.9, max(0.01, row["hour_count"] / total))
+
+        rows = list(client.query(sql).result())
+
+        base_prob = float(rows[0]["accident_probability"])
+
+        base_prob = min(0.9, max(0.01, base_prob))
+
         final_prob = min(0.95, base_prob * road_factor)
-        
+
         explanation = []
+
         if base_prob > 0.06:
-            explanation.append(f"Hour {request.hour}:00 has elevated accident rate")
+            explanation.append(
+                f"Hour {request.hour}:00 "
+                f"has elevated accident rate"
+            )
+
         if road_factor > 1.2:
-            explanation.append(f"{request.road_topology} is a high-risk road feature")
-        
-        result = SimulateResponse(probability_score=round(final_prob, 4),
-                                 predicted_severity=classify_risk(final_prob),
-                                 explanation=explanation)
-        
-        span.set_attribute("business.final_probability", result.probability_score)
-        logger.info(f"Simulation result: probability={final_prob}, severity={result.predicted_severity}")
-        
+            explanation.append(
+                f"{request.road_topology} "
+                f"is a high-risk road feature"
+            )
+
+        result = SimulateResponse(
+            probability_score=round(final_prob, 4),
+            predicted_severity=classify_risk(final_prob),
+            explanation=explanation
+        )
+
+        span.set_attribute(
+            "business.final_probability",
+            result.probability_score
+        )
+
+        logger.info(
+            f"Simulation result: probability={final_prob}, "
+            f"severity={result.predicted_severity}"
+        )
+
         return result
+
     except Exception as e:
         span.set_attribute("error", True)
         span.set_attribute("error.message", str(e))
+
         logger.error(f"Error in simulate_risk: {str(e)}")
+
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/stats")
