@@ -31,6 +31,16 @@ else
     echo "⚠️ Ficheiro bq-key.json não encontrado em $SCRIPT_DIR"
 fi
 
+echo "[3/9] Verificando modelos no BigQuery..."
+# Verificar se os modelos já existem
+MODELS_EXIST=$(bq ls --models proj1cc-493515:accidents 2>/dev/null | grep -E "severity_model|risk_model|occurrence_model" | wc -l || echo "0")
+if [ "$MODELS_EXIST" -lt 3 ]; then
+    echo "   Modelos não encontrados (encontrados: $MODELS_EXIST/3). A criar..."
+    bash "$SCRIPT_DIR/create-models.sh" || echo "⚠️ Erro ao criar modelos"
+else
+    echo "✓ Modelos já existem no BigQuery. A saltar criação."
+fi
+
 echo "[4/10] Aplicando ConfigMap..."
 kubectl apply -f "$KUBERNETES_DIR/configmap.yaml" -n "$NAMESPACE"
 kubectl apply -f "$KUBERNETES_DIR/prometheus_configmap.yaml" -n "$NAMESPACE"

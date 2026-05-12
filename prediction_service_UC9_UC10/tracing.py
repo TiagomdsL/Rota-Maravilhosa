@@ -26,8 +26,8 @@ def setup_tracing(app: FastAPI, service_name: str):
     provider = TracerProvider(resource=resource)
     
     exporter = OTLPSpanExporter(
-        endpoint="http://otel-collector.observability:4318/v1/traces",
-        insecure=True
+        endpoint="http://otel-collector.observability.svc.cluster.local:4318/v1/traces",
+        #insecure=True
     )
     
     provider.add_span_processor(BatchSpanProcessor(exporter))

@@ -104,20 +104,23 @@ def predict_severity(input_data: SeverityInput):
     logger.info(f"Predict severity: visibility={input_data.visibility}, precip={input_data.precipitation}")
     
     client = get_client()
+    
     sql = f"""
-        SELECT AVG(Severity) as avg_severity
-        FROM `{TABLE}`
-        WHERE Visibility_mi_ BETWEEN {input_data.visibility-0.1} AND {input_data.visibility+0.1}
-        AND Precipitation_in_ BETWEEN {input_data.precipitation-0.01} AND {input_data.precipitation+0.01}
-        AND LOWER(Weather_Condition) = LOWER('{input_data.weather_condition}')
+    SELECT predicted_Severity as predicted_severity
+    FROM ML.PREDICT(
+      MODEL `proj1cc-493515.accidents.severity_model`,
+      (
+        SELECT 
+          {input_data.visibility} as visibility,
+          {input_data.precipitation} as precipitation,
+          '{input_data.weather_condition}' as weather_condition
+      )
+    )
     """
     rows = list(client.query(sql).result())
-    avg = rows[0]["avg_severity"] if rows else None
-    if avg is None:
-        global_rows = list(client.query(f"SELECT AVG(Severity) as avg_severity FROM `{TABLE}`").result())
-        avg = global_rows[0]["avg_severity"] if global_rows else 2.0
+    predicted_severity = rows[0]["predicted_severity"]
     
-    result = {"predicted_severity": round(avg, 2)}
+    result = {"predicted_severity": round(predicted_severity, 2)}
     span.set_attribute("business.predicted_severity", result["predicted_severity"])
     
     logger.info(f"Predicted severity: {result['predicted_severity']}")
@@ -132,31 +135,44 @@ async def calculate_risk_score(request: RiskRequest):
     
     logger.info(f"Risk score for location: ({request.latitude}, {request.longitude})")
     
-    async with httpx.AsyncClient() as http_client:
-        try:
-            response = await http_client.post(
-                f"{DATA_SERVICE_URL}/features",
-                json={"latitude": request.latitude, "longitude": request.longitude,
-                      "timestamp": request.timestamp.isoformat()})
-            response.raise_for_status()
-            features = response.json()
-        except httpx.HTTPStatusError:
-            features = {"total_accidents": 0, "avg_severity": 0.0,
-                       "avg_visibility": None, "avg_precipitation": None, "weather_distribution": {}}
-        except httpx.HTTPError as e:
-            raise HTTPException(status_code=502, detail=f"Data service unavailable: {str(e)}")
-
-    total = features["total_accidents"]
-    avg_severity = features["avg_severity"]
-    prob = min(total / 10, 1.0)
-    if features.get("avg_visibility") and features["avg_visibility"] < 5.0:
-        prob = min(prob * 1.3, 1.0)
-    if features.get("avg_precipitation") and features["avg_precipitation"] > 0.1:
-        prob = min(prob * 1.2, 1.0)
-    severity = 1 if total == 0 or avg_severity == 0 else max(1, min(4, round(avg_severity)))
+    client = get_client()
     
-    result = {"accident_probability": round(prob, 4), "predicted_severity": severity,
-            "nearby_accidents_count": total}
+    dt = request.timestamp
+    
+    sql = f"""
+    SELECT predicted_has_accident as risk_probability
+    FROM ML.PREDICT(
+      MODEL `proj1cc-493515.accidents.risk_model`,
+      (
+        SELECT 
+          {dt.hour} as hour,
+          {dt.weekday()} as day_of_week,
+          {dt.month} as month,
+          {request.latitude} as latitude,
+          {request.longitude} as longitude,
+          'Clear' as weather_condition
+      )
+    )
+    """
+    
+    rows = list(client.query(sql).result())
+    prob = float(rows[0]["risk_probability"])
+    
+    # Determinar severidade baseada na probabilidade
+    if prob < 0.25:
+        severity = 1
+    elif prob < 0.5:
+        severity = 2
+    elif prob < 0.75:
+        severity = 3
+    else:
+        severity = 4
+    
+    result = {
+        "accident_probability": round(prob, 4),
+        "predicted_severity": severity,
+        "nearby_accidents_count": 0
+    }
     
     span.set_attribute("business.accident_probability", result["accident_probability"])
     span.set_attribute("business.predicted_severity", result["predicted_severity"])

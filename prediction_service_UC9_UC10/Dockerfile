@@ -5,7 +5,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY main.py .
+# Copiar todos os ficheiros .py (incluindo tracing.py)
+COPY *.py ./
 
 EXPOSE 8008
 
