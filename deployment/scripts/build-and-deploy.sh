@@ -9,27 +9,18 @@ echo "========================================="
 echo "Build e Deploy da Rota Maravilhosa"
 echo "========================================="
 
+if ! kubectl get namespace "$NAMESPACE" &>/dev/null; then
+    kubectl create namespace "$NAMESPACE"
+fi
+
 echo "[0/6] Verificando infraestrutura necessária..."
 
-# Verificar se Istio e Jaeger já estão instalados
-if ! kubectl get pods -n istio-system &>/dev/null; then
-    echo "📦 Instalando Istio e Jaeger..."
-    cd "$BASE_DIR/deployment/scripts"
-    ./Jaeger.sh
-    ./Istio.sh
-    ./circuit-breakers.sh
-    echo "✅ Infraestrutura instalada!"
-else
-    echo "✅ Istio já instalado"
-fi
+cd "$BASE_DIR/deployment/scripts"
+./Jaeger.sh
+./Istio.sh
+./circuit-breakers.sh
 
-# Verificar sidecar injection
-if ! kubectl get namespace $NAMESPACE -o yaml | grep -q "istio-injection"; then
-    cd "$BASE_DIR/deployment/scripts"
-    echo "🔧 Ativando sidecar injection..."
-    kubectl label namespace $NAMESPACE istio-injection=enabled --overwrite
-fi
-
+kubectl label namespace $NAMESPACE istio-injection=enabled --overwrite
 
 enable_api() {
     local api=$1

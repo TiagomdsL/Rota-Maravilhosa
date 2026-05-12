@@ -2,7 +2,7 @@
 # 01-install-jaeger.sh
 # Script para instalar Jaeger e OpenTelemetry Collector
 
-set -e  # Para o script se algum comando falhar
+set -e
 
 echo "🚀 A instalar Jaeger e OpenTelemetry Collector..."
 
@@ -10,57 +10,148 @@ echo "🚀 A instalar Jaeger e OpenTelemetry Collector..."
 echo "📁 Criando namespace observability..."
 kubectl create namespace observability --dry-run=client -o yaml | kubectl apply -f -
 
-# 2. Instalar cert-manager (requisito para o Jaeger Operator)
-echo "📦 Instalando cert-manager..."
-kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.2/cert-manager.yaml
-
-# 3. Aguardar cert-manager iniciar
-echo "⏳ Aguardando cert-manager..."
-kubectl wait --namespace cert-manager --for=condition=ready pod --all --timeout=120s
-
-# 4. Instalar Jaeger Operator
-echo "📦 Instalando Jaeger Operator..."
-kubectl create -f https://github.com/jaegertracing/jaeger-operator/releases/download/v1.51.0/jaeger-operator.yaml -n observability
-
-# 5. Aguardar Operator iniciar
-echo "⏳ Aguardando Jaeger Operator..."
-kubectl wait --namespace observability --for=condition=ready pod -l name=jaeger-operator --timeout=60s
-
-# 6. Criar instância do Jaeger
-echo "🔧 Criando instância Jaeger..."
-kubectl apply -n observability -f - <<EOF
-apiVersion: jaegertracing.io/v1
-kind: Jaeger
+# 2. Instalar Jaeger all-in-one (sem operator)
+echo "📦 Instalando Jaeger..."
+cat << 'EOF' | kubectl apply -f -
+apiVersion: apps/v1
+kind: Deployment
 metadata:
-  name: jaeger-traces
+  name: jaeger
+  namespace: observability
 spec:
-  strategy: allInOne
-  allInOne:
-    options:
-      log-level: info
-  ingress:
-    enabled: false
-  storage:
-    type: memory
-    options:
-      memory:
-        max-traces: 100000
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jaeger
+  template:
+    metadata:
+      labels:
+        app: jaeger
+    spec:
+      containers:
+      - name: jaeger
+        image: jaegertracing/all-in-one:latest
+        ports:
+        - containerPort: 16686
+          name: ui
+        - containerPort: 4318
+          name: otlp-http
+        env:
+        - name: COLLECTOR_OTLP_ENABLED
+          value: "true"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jaeger
+  namespace: observability
+spec:
+  selector:
+    app: jaeger
+  ports:
+  - name: ui
+    port: 16686
+    targetPort: 16686
+  - name: otlp-http
+    port: 4318
+    targetPort: 4318
 EOF
 
-# 7. Aplicar OpenTelemetry Collector (se o arquivo existir)
-if [ -f "../kubernetes/otel-collector.yaml" ]; then
-    echo "📦 Aplicando OpenTelemetry Collector..."
-    kubectl apply -f ../kubernetes/otel-collector.yaml
-else
-    echo "⚠️ Ficheiro otel-collector.yaml não encontrado em ../kubernetes/"
-fi
+# 3. Aguardar Jaeger
+echo "⏳ Aguardando Jaeger..."
+sleep 10
+kubectl wait --namespace observability --for=condition=ready pod --all --timeout=60s
+
+# 4. Instalar OpenTelemetry Collector
+echo "📦 Instalando OpenTelemetry Collector..."
+
+cat << 'EOT' | kubectl apply -f -
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: observability
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          http:
+            endpoint: 0.0.0.0:4318
+    processors:
+      batch:
+        timeout: 1s
+    exporters:
+      debug:
+        verbosity: detailed
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [debug]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  namespace: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+    spec:
+      containers:
+      - name: otel-collector
+        image: otel/opentelemetry-collector:latest
+        args: ["--config=/etc/otel/config.yaml"]
+        ports:
+        - containerPort: 4318
+          name: otlp-http
+        volumeMounts:
+        - name: config
+          mountPath: /etc/otel
+      volumes:
+      - name: config
+        configMap:
+          name: otel-collector-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: observability
+spec:
+  selector:
+    app: otel-collector
+  ports:
+  - name: otlp-http
+    port: 4318
+    targetPort: 4318
+EOT
+
+# 5. Criar alias DNS no namespace rota-maravilhosa
+cat << 'EOT' | kubectl apply -f -
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: rota-maravilhosa
+spec:
+  type: ExternalName
+  externalName: otel-collector.observability.svc.cluster.local
+EOT
 
 echo ""
-echo "✅ Jaeger e OpenTelemetry Collector instalados com sucesso!"
+echo "✅ Jaeger e OpenTelemetry Collector instalados!"
 echo ""
 echo "🔍 Para verificar:"
 echo "   kubectl get pods -n observability"
 echo ""
-echo "🌐 Para aceder à interface do Jaeger (port-forward):"
-echo "   kubectl port-forward -n observability svc/jaeger-traces-query 16686:16686"
-echo "   Aceda em: http://localhost:16686"
+echo "🌐 Para aceder ao Jaeger:"
+echo "   kubectl port-forward -n observability svc/jaeger 16686:16686"

@@ -14,18 +14,22 @@ for dir in "$KUBERNETES_DIR" "$DEPLOYMENTS_DIR" "$SERVICES_DIR"; do
     fi
 done
 
-echo "[1/10] Criando namespace..."
-kubectl apply -f "$KUBERNETES_DIR/namespace.yaml"
+#echo "[1/10] Criando namespace..."
+#kubectl apply -f "$KUBERNETES_DIR/namespace.yaml"
 
 echo "[2/10] Aplicando NetworkPolicy (default-deny)..."
 kubectl apply -f "$KUBERNETES_DIR/networkpolicy.yaml" -n "$NAMESPACE"
 
-echo "[3/10] Criando Secret do BigQuery..."
-kubectl create secret generic bq-secret \
-    --namespace=$NAMESPACE \
-    --from-literal=API_TOKEN="$BIGQUERY_API_TOKEN" \
-    --dry-run=client -o yaml | kubectl apply -f -
-echo "✓ Secret bq-secret criada"
+echo "[2/9] Criando Secret do BigQuery..."
+if [ -f "$SCRIPT_DIR/bq-key.json" ]; then
+    kubectl create secret generic bq-secret \
+        --namespace=$NAMESPACE \
+        --from-file=API_TOKEN="$SCRIPT_DIR/bq-key.json" \
+        --dry-run=client -o yaml | kubectl apply -f -
+    echo "✓ Secret bq-secret criada a partir de $SCRIPT_DIR/bq-key.json"
+else
+    echo "⚠️ Ficheiro bq-key.json não encontrado em $SCRIPT_DIR"
+fi
 
 echo "[4/10] Aplicando ConfigMap..."
 kubectl apply -f "$KUBERNETES_DIR/configmap.yaml" -n "$NAMESPACE"
