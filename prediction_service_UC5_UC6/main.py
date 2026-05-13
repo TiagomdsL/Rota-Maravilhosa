@@ -120,7 +120,7 @@ def predict_severity(input_data: SeverityInput):
     rows = list(client.query(sql).result())
     predicted_severity = rows[0]["predicted_severity"]
     
-    result = {"predicted_severity": round(predicted_severity, 2)}
+    result = {"predicted_severity": predicted_severity}
     span.set_attribute("business.predicted_severity", result["predicted_severity"])
     
     logger.info(f"Predicted severity: {result['predicted_severity']}")
@@ -136,21 +136,16 @@ async def calculate_risk_score(request: RiskRequest):
     logger.info(f"Risk score for location: ({request.latitude}, {request.longitude})")
     
     client = get_client()
-    
     dt = request.timestamp
     
     sql = f"""
-    SELECT predicted_has_accident as risk_probability
+    SELECT predicted_severity_score as risk_probability
     FROM ML.PREDICT(
       MODEL `proj1cc-493515.accidents.risk_model`,
       (
         SELECT 
           {dt.hour} as hour,
-          {dt.weekday()} as day_of_week,
-          {dt.month} as month,
-          {request.latitude} as latitude,
-          {request.longitude} as longitude,
-          'Clear' as weather_condition
+          Severity as severity_score
       )
     )
     """
@@ -158,7 +153,10 @@ async def calculate_risk_score(request: RiskRequest):
     rows = list(client.query(sql).result())
     prob = float(rows[0]["risk_probability"])
     
-    # Determinar severidade baseada na probabilidade
+    # Normalizar de 1-4 para 0-1
+    prob = (prob - 1) / 3
+    
+    # Determinar severidade
     if prob < 0.25:
         severity = 1
     elif prob < 0.5:
