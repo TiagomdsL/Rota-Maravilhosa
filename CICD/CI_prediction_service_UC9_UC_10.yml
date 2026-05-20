@@ -1,0 +1,53 @@
+# =============================================================================
+# CI - prediction-service-uc9-uc10
+# Trigger: push em main com alterações em prediction_service_UC9_UC10/**
+# =============================================================================
+
+steps:
+
+  # ── 1. LINT ──────────────────────────────────────────────────────────────
+  - id: lint-uc9-uc10
+    name: python:3.11-slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        pip install flake8 --quiet
+        flake8 prediction_service_UC9_UC10/ \
+          --max-line-length=120 \
+          --exclude=__pycache__ \
+          --count --statistics
+    dir: .
+
+  # ── 2. TESTES UNITÁRIOS ───────────────────────────────────────────────────
+  - id: test-uc9-uc10
+    name: python:3.11-slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        pip install fastapi httpx pytest pytest-asyncio \
+          google-cloud-bigquery google-auth \
+          prometheus-client --quiet
+
+        pytest prediction_service_UC9_UC10/tests/ -v \
+          --tb=short \
+          --junitxml=/workspace/test-results-uc9-uc10.xml \
+          || exit 1
+    dir: .
+
+  # ── 3. BUILD (VALIDAÇÃO DE COMPILAÇÃO) ───────────────────────────────────
+  - id: build-uc9-uc10
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - prediction-service-uc9-uc10:test
+      - ./prediction_service_UC9_UC10
+    waitFor: [test-uc9-uc10]
+
+options:
+  machineType: E2_HIGHCPU_8
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: 600s
