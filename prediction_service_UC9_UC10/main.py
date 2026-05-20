@@ -133,7 +133,7 @@ def predict_occurrence(request: PredictRequest):
         client = get_client()
 
         sql = f"""
-        SELECT predicted_has_accident as accident_probability
+        SELECT predicted_severity_score as accident_probability
         FROM ML.PREDICT(
           MODEL `proj1cc-493515.accidents.occurrence_model2`,
           (
@@ -148,9 +148,9 @@ def predict_occurrence(request: PredictRequest):
 
         rows = list(client.query(sql).result())
 
-        prob = float(rows[0]["accident_probability"])
-
-        prob = min(0.9, max(0.01, prob))
+        severity_score = float(rows[0]["accident_probability"])  
+        prob = (severity_score - 1) / 3  
+        prob = min(0.95, max(0.05, prob))  
 
         result = PredictResponse(
             accident_probability=round(prob, 4),
@@ -224,7 +224,7 @@ def simulate_risk(request: SimulateRequest):
         client = get_client()
 
         sql = f"""
-        SELECT predicted_has_accident as accident_probability
+        SELECT predicted_severity_score as accident_probability
         FROM ML.PREDICT(
           MODEL `proj1cc-493515.accidents.occurrence_model2`,
           (
@@ -239,9 +239,10 @@ def simulate_risk(request: SimulateRequest):
 
         rows = list(client.query(sql).result())
 
-        base_prob = float(rows[0]["accident_probability"])
-
-        base_prob = min(0.9, max(0.01, base_prob))
+        #severity_score = float(rows[0]["predicted_severity_score"])
+        severity_score = float(rows[0]["accident_probability"])
+        base_prob = (severity_score - 1) / 3
+        base_prob = min(0.95, max(0.05, base_prob))
 
         final_prob = min(0.95, base_prob * road_factor)
 
