@@ -138,42 +138,58 @@ async def calculate_risk_score(request: RiskRequest):
     client = get_client()
     dt = request.timestamp
     
+    # 1. Prever severidade baseada na hora
     sql = f"""
     SELECT predicted_severity_score as risk_probability
     FROM ML.PREDICT(
       MODEL `proj1cc-493515.accidents.risk_model`,
-      (
-        SELECT 
-          {dt.hour} as hour,
-          Severity as severity_score
-      )
+      (SELECT {dt.hour} as hour)
     )
     """
     
     rows = list(client.query(sql).result())
     prob = float(rows[0]["risk_probability"])
     
-    # Normalizar de 1-4 para 0-1
-    prob = (prob - 1) / 3
+    # 2. Contar acidentes próximos (raio de aproximadamente 1km)
+    # 0.01 graus ~ 1.1km no equador
+    nearby_sql = f"""
+    SELECT COUNT(*) as nearby_count
+    FROM `proj1cc-493515.accidents.accidents`
+    WHERE 
+        Start_Lat BETWEEN {request.latitude - 0.01} AND {request.latitude + 0.01}
+        AND Start_Lng BETWEEN {request.longitude - 0.01} AND {request.longitude + 0.01}
+        AND Start_Time IS NOT NULL
+    """
     
-    # Determinar severidade
-    if prob < 0.25:
+    try:
+        nearby_rows = list(client.query(nearby_sql).result())
+        nearby_count = nearby_rows[0]["nearby_count"]
+    except Exception as e:
+        logger.warning(f"Could not fetch nearby accidents: {e}")
+        nearby_count = 0
+    
+    # 3. Normalizar de 1-4 para 0-1
+    prob_normalized = (prob - 1) / 3
+    
+    # 4. Determinar severidade
+    if prob_normalized < 0.25:
         severity = 1
-    elif prob < 0.5:
+    elif prob_normalized < 0.5:
         severity = 2
-    elif prob < 0.75:
+    elif prob_normalized < 0.75:
         severity = 3
     else:
         severity = 4
     
     result = {
-        "accident_probability": round(prob, 4),
+        "accident_probability": round(prob_normalized, 4),
         "predicted_severity": severity,
-        "nearby_accidents_count": 0
+        "nearby_accidents_count": nearby_count
     }
     
     span.set_attribute("business.accident_probability", result["accident_probability"])
     span.set_attribute("business.predicted_severity", result["predicted_severity"])
+    span.set_attribute("business.nearby_accidents", nearby_count)
     
-    logger.info(f"Risk score result: probability={prob}, severity={severity}")
+    logger.info(f"Risk score result: probability={prob_normalized}, severity={severity}, nearby={nearby_count}")
     return result
