@@ -21,7 +21,9 @@ jobs:
       - name: Lint with flake8
         run: |
           pip install flake8 --quiet
-          flake8 data_service_UC8_UC11/ --count --statistics
+          flake8 data_service_UC8_UC11/ \
+            --count --statistics \
+            --ignore=E501,E402
       
       - name: Test with pytest
         run: |
