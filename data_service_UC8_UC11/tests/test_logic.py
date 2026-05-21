@@ -56,3 +56,14 @@ def test_build_county_comparison_query():
     assert "WHERE State = 'CA'" in query
     assert "GROUP BY County" in query
     assert "ORDER BY accident_count DESC" in query
+
+
+def test_build_county_comparison_query2():
+    query = build_county_comparison_query("TX")
+
+    assert "County" in query
+    assert "COUNT(ID) as accident_count" in query
+    assert "AVG(Severity) as avg_severity" in query
+    assert "WHERE State = 'TX'" in query
+    assert "GROUP BY County" in query
+    assert "ORDER BY accident_count DESC" in query
