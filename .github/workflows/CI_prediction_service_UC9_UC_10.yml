@@ -27,10 +27,16 @@ jobs:
         with:
           python-version: '3.11'
       
+      - name: Install dependencies
+        run: |
+          cd prediction_service_UC9_UC10
+          pip install --quiet -r requirements.txt
+          pip install --quiet pytest flake8  # dependências de dev
+      
       - name: Lint with flake8
         run: |
-          pip install flake8 --quiet
-          flake8 prediction_service_UC9_UC10/ \
+          cd prediction_service_UC9_UC10
+          flake8 . \
             --max-line-length=120 \
             --exclude=__pycache__ \
             --count --statistics \
@@ -38,8 +44,5 @@ jobs:
       
       - name: Run unit tests
         run: |
-          pip install fastapi httpx pytest pytest-asyncio \
-            google-cloud-bigquery google-auth \
-            prometheus-client --quiet
-          
-          pytest prediction_service_UC9_UC10/tests/ -v --tb=short
+          cd prediction_service_UC9_UC10
+          pytest tests/ -v --tb=short
