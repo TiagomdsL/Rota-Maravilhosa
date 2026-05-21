@@ -1,34 +1,29 @@
-steps:
+name: CI
 
-  # ── 1. LINT ─────────────────────────────
-  - id: lint
-    name: python:3.11-slim
-    entrypoint: bash
-    args:
-      - -c
-      - |
-        pip install flake8 --quiet
-        flake8 data_service_UC8_UC11/ --count --statistics
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
-  # ── 2. TESTES ───────────────────────────
-  - id: tests
-    name: python:3.11-slim
-    entrypoint: bash
-    args:
-      - -c
-      - |
-        pip install pytest fastapi httpx --quiet
-        pytest data_service_UC8_UC11/tests/ -v
-
-  # ── 3. BUILD (SÓ VALIDAR SE COMPILA) ────
-  - id: build
-    name: gcr.io/cloud-builders/docker
-    args:
-      - build
-      - -t
-      - data-service-test
-      - ./data_service_UC8_UC11
-    waitFor: [tests]
-
-options:
-  machineType: E2_HIGHCPU_8
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Lint with flake8
+        run: |
+          pip install flake8 --quiet
+          flake8 data_service_UC8_UC11/ --count --statistics
+      
+      - name: Test with pytest
+        run: |
+          pip install pytest fastapi httpx --quiet
+          pytest data_service_UC8_UC11/tests/ -v

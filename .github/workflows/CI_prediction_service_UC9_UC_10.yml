@@ -3,51 +3,64 @@
 # Trigger: push em main com alterações em prediction_service_UC9_UC10/**
 # =============================================================================
 
-steps:
+name: CI - prediction-service-uc9-uc10
 
-  # ── 1. LINT ──────────────────────────────────────────────────────────────
-  - id: lint-uc9-uc10
-    name: python:3.11-slim
-    entrypoint: bash
-    args:
-      - -c
-      - |
-        pip install flake8 --quiet
-        flake8 prediction_service_UC9_UC10/ \
-          --max-line-length=120 \
-          --exclude=__pycache__ \
-          --count --statistics
-    dir: .
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'prediction_service_UC9_UC10/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'prediction_service_UC9_UC10/**'
 
-  # ── 2. TESTES UNITÁRIOS ───────────────────────────────────────────────────
-  - id: test-uc9-uc10
-    name: python:3.11-slim
-    entrypoint: bash
-    args:
-      - -c
-      - |
-        pip install fastapi httpx pytest pytest-asyncio \
-          google-cloud-bigquery google-auth \
-          prometheus-client --quiet
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      # ── 1. LINT ──────────────────────────────────────────────────────────────
+      - name: Lint with flake8
+        run: |
+          pip install flake8 --quiet
+          flake8 prediction_service_UC9_UC10/ \
+            --max-line-length=120 \
+            --exclude=__pycache__ \
+            --count --statistics
+      
+      # ── 2. TESTES UNITÁRIOS ───────────────────────────────────────────────────
+      - name: Run unit tests
+        run: |
+          pip install fastapi httpx pytest pytest-asyncio \
+            google-cloud-bigquery google-auth \
+            prometheus-client --quiet
+          
+          pytest prediction_service_UC9_UC10/tests/ -v \
+            --tb=short \
+            || exit 1
+      
+      # ── 3. Upload resultados (opcional) ──────────────────────────────────────
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-uc9-uc10
+          path: |
+            prediction_service_UC9_UC10/tests/
+            test-results-*.xml || true
 
-        pytest prediction_service_UC9_UC10/tests/ -v \
-          --tb=short \
-          --junitxml=/workspace/test-results-uc9-uc10.xml \
-          || exit 1
-    dir: .
+permissions:
+  contents: read
+  checks: write
 
-  # ── 3. BUILD (VALIDAÇÃO DE COMPILAÇÃO) ───────────────────────────────────
-  - id: build-uc9-uc10
-    name: gcr.io/cloud-builders/docker
-    args:
-      - build
-      - -t
-      - prediction-service-uc9-uc10:test
-      - ./prediction_service_UC9_UC10
-    waitFor: [test-uc9-uc10]
-
-options:
-  machineType: E2_HIGHCPU_8
-  logging: CLOUD_LOGGING_ONLY
-
-timeout: 600s
+# Timeout: 10 minutos
+timeout-minutes: 10

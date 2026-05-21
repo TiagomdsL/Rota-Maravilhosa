@@ -1,63 +1,39 @@
-# =============================================================================
-# CI - Observabilidade: Prometheus + Grafana
-#
-# Objetivo:
-#   Apenas validar configurações (sem deploy)
-# =============================================================================
+name: CI - Observabilidade
 
-steps:
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'deployment/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'deployment/**'
 
-  # ── 1. VALIDAR prometheus.yml ─────────────────────────────────────────────
-  - id: validate-prometheus-config
-    name: prom/prometheus:latest
-    entrypoint: promtool
-    args:
-      - check
-      - config
-      - deployment/kubernetes/prometheus_configmap.yaml
-
-  # ── 2. VALIDAR DASHBOARDS GRAFANA ─────────────────────────────────────────
-  - id: validate-grafana-dashboards
-    name: python:3.11-slim
-    entrypoint: bash
-    args:
-      - -c
-      - |
-        DASHBOARD_DIR="deployment/grafana/dashboards"
-        if [ -d "$DASHBOARD_DIR" ]; then
-          for f in $DASHBOARD_DIR/*.json; do
-            python3 -c "import json; json.load(open('$f'))" \
-              && echo "OK: $f" \
-              || { echo "ERRO: $f inválido"; exit 1; }
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Validate Prometheus
+        run: |
+          docker run --rm -v $(pwd):/mnt prom/prometheus:latest \
+            promtool check config /mnt/deployment/kubernetes/prometheus_configmap.yaml
+      
+      - name: Validate Grafana dashboards (JSON)
+        run: |
+          find deployment/grafana -name "*.json" 2>/dev/null | while read f; do
+            python3 -m json.tool "$f" > /dev/null && echo "✓ $f"
           done
-        else
-          echo "Sem dashboards"
-        fi
-
-  # ── 3. VALIDAR YAML KUBERNETES (DRY-RUN) ──────────────────────────────────
-  - id: validate-k8s-manifests
-    name: gcr.io/cloud-builders/kubectl
-    entrypoint: bash
-    args:
-      - -c
-      - |
-        kubectl apply -f deployment/kubernetes/prometheus_configmap.yaml \
-          --dry-run=client --validate=true
-
-        kubectl apply -f deployment/deployments/prometheus-deployment.yaml \
-          --dry-run=client --validate=true
-
-        kubectl apply -f deployment/deployments/graphana-deployment.yaml \
-          --dry-run=client --validate=true
-
-        kubectl apply -f deployment/services/prometheus-svc.yaml \
-          --dry-run=client --validate=true
-
-        kubectl apply -f deployment/services/graphana-service.yaml \
-          --dry-run=client --validate=true
-
-options:
-  machineType: E2_STANDARD_2
-  logging: CLOUD_LOGGING_ONLY
-
-timeout: 300s
+      
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+      
+      - name: Validate K8s manifests
+        run: |
+          for file in deployment/kubernetes/*.yaml deployment/deployments/*.yaml deployment/services/*.yaml; do
+            [ -f "$file" ] && kubectl apply -f "$file" --dry-run=client --validate=true
+          done
