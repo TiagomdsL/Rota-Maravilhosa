@@ -44,3 +44,13 @@ def test_ml_query():
     assert "-8.0 as longitude" in q
     assert "rain" in q
     assert "ML.PREDICT" in q
+
+
+def test_ml_query2():
+    q = ml_query(15, 30.0, -8.0, "rain")
+
+    assert "15 as hour" in q
+    assert "30.0 as latitude" in q
+    assert "-8.0 as longitude" in q
+    assert "rain" in q
+    assert "ML.PREDICT" in q

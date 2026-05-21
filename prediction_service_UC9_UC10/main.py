@@ -4,7 +4,7 @@ import logging
 import time
 from typing import List
 
-from fastapi import FastAPI, HTTPException, Query, Response, Request
+from fastapi import FastAPI, HTTPException, Response, Request
 from pydantic import BaseModel, Field
 
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
