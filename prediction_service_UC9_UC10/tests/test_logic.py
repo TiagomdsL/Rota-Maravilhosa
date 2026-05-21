@@ -4,12 +4,7 @@ import os
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from main import (
-    classify_risk,
-    road_factor_map,
-    ml_to_prob,
-    ml_query
-)
+from main import classify_risk, road_factor_map, ml_to_prob, ml_query
 
 
 def test_classify_risk():

@@ -7,12 +7,7 @@ from typing import Optional
 from fastapi import FastAPI, Query, Response, Request
 from google.cloud import bigquery
 from google.oauth2 import service_account
-from prometheus_client import (
-    Counter,
-    Histogram,
-    generate_latest,
-    CONTENT_TYPE_LATEST
-)
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
 from tracing import setup_tracing, get_current_span
 
@@ -33,27 +28,16 @@ SERVICE_NAME = "data-service-uc8-uc11"
 # PROMETHEUS METRICS
 # =============================================================================
 
-REQUEST_COUNT = Counter(
-    "requests_total",
-    "Total requests",
-    ["service", "endpoint"]
-)
+REQUEST_COUNT = Counter("requests_total", "Total requests", ["service", "endpoint"])
 
-REQUEST_LATENCY = Histogram(
-    "request_latency_seconds",
-    "Request latency",
-    ["service"]
-)
+REQUEST_LATENCY = Histogram("request_latency_seconds", "Request latency", ["service"])
 
-ERROR_COUNT = Counter(
-    "requests_errors_total",
-    "Total errors",
-    ["service"]
-)
+ERROR_COUNT = Counter("requests_errors_total", "Total errors", ["service"])
 
 # =============================================================================
 # MIDDLEWARE
 # =============================================================================
+
 
 @app.middleware("http")
 async def metrics_middleware(request: Request, call_next):
@@ -62,10 +46,7 @@ async def metrics_middleware(request: Request, call_next):
     try:
         response = await call_next(request)
 
-        REQUEST_COUNT.labels(
-            service=SERVICE_NAME,
-            endpoint=request.url.path
-        ).inc()
+        REQUEST_COUNT.labels(service=SERVICE_NAME, endpoint=request.url.path).inc()
 
         if response.status_code >= 400:
             ERROR_COUNT.labels(service=SERVICE_NAME).inc()
@@ -76,20 +57,21 @@ async def metrics_middleware(request: Request, call_next):
         duration = time.time() - start
         REQUEST_LATENCY.labels(service=SERVICE_NAME).observe(duration)
 
+
 # =============================================================================
 # METRICS ENDPOINT
 # =============================================================================
 
+
 @app.get("/metrics")
 def metrics():
-    return Response(
-        generate_latest(),
-        media_type=CONTENT_TYPE_LATEST
-    )
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
 
 # =============================================================================
 # BIGQUERY CLIENT
 # =============================================================================
+
 
 def get_client():
     api_token = os.environ.get("API_TOKEN")
@@ -100,38 +82,34 @@ def get_client():
         )
 
         return bigquery.Client(
-            credentials=credentials,
-            project=PROJECT,
-            location=LOCATION
+            credentials=credentials, project=PROJECT, location=LOCATION
         )
 
-    return bigquery.Client(
-        project=PROJECT,
-        location=LOCATION
-    )
+    return bigquery.Client(project=PROJECT, location=LOCATION)
+
 
 # =============================================================================
 # HEALTHCHECKS
 # =============================================================================
+
 
 @app.get("/health")
 async def health():
     logger.info("Health check")
     return {"status": "ok"}
 
+
 @app.get("/ready")
 async def ready():
     return {"status": "ok"}
+
 
 # =============================================================================
 # BUSINESS LOGIC
 # =============================================================================
 
-def build_hotspots_query(
-    city: Optional[str],
-    state: Optional[str],
-    limit: int
-):
+
+def build_hotspots_query(city: Optional[str], state: Optional[str], limit: int):
     filters = []
 
     if city:
@@ -154,14 +132,9 @@ def build_hotspots_query(
         LIMIT {limit}
     """
 
-def fetch_hotspots(
-    city: Optional[str],
-    state: Optional[str],
-    limit: int
-):
-    logger.info(
-        f"Fetching hotspots: city={city}, state={state}, limit={limit}"
-    )
+
+def fetch_hotspots(city: Optional[str], state: Optional[str], limit: int):
+    logger.info(f"Fetching hotspots: city={city}, state={state}, limit={limit}")
 
     client = get_client()
 
@@ -172,6 +145,7 @@ def fetch_hotspots(
     logger.info(f"Hotspots returned {len(result)} locations")
 
     return result
+
 
 def build_county_comparison_query(state: str):
     return f"""
@@ -184,6 +158,7 @@ def build_county_comparison_query(state: str):
         GROUP BY County
         ORDER BY accident_count DESC
     """
+
 
 def fetch_county_comparison(state: str):
     logger.info(f"Fetching county comparison for state={state}")
@@ -198,15 +173,17 @@ def fetch_county_comparison(state: str):
 
     return result
 
+
 # =============================================================================
 # ENDPOINTS
 # =============================================================================
+
 
 @app.get("/hotspots")
 def get_hotspots(
     city: Optional[str] = Query(None),
     state: Optional[str] = Query(None),
-    limit: int = 10
+    limit: int = 10,
 ):
     span = get_current_span()
 
@@ -219,6 +196,7 @@ def get_hotspots(
     span.set_attribute("business.limit", limit)
 
     return fetch_hotspots(city, state, limit)
+
 
 @app.get("/county-comparison")
 def county_comparison(state: str):

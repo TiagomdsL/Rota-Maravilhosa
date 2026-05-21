@@ -7,12 +7,7 @@ from typing import List
 from fastapi import FastAPI, HTTPException, Query, Response, Request
 from pydantic import BaseModel, Field
 
-from prometheus_client import (
-    Counter,
-    Histogram,
-    generate_latest,
-    CONTENT_TYPE_LATEST
-)
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
 from google.cloud import bigquery
 from google.oauth2 import service_account
@@ -43,23 +38,11 @@ SERVICE_NAME = "prediction-service-uc9-uc10"
 # PROMETHEUS
 # ─────────────────────────────────────────────
 
-REQUEST_COUNT = Counter(
-    "requests_total",
-    "Total requests",
-    ["service", "endpoint"]
-)
+REQUEST_COUNT = Counter("requests_total", "Total requests", ["service", "endpoint"])
 
-REQUEST_LATENCY = Histogram(
-    "request_latency_seconds",
-    "Request latency",
-    ["service"]
-)
+REQUEST_LATENCY = Histogram("request_latency_seconds", "Request latency", ["service"])
 
-ERROR_COUNT = Counter(
-    "requests_errors_total",
-    "Total errors",
-    ["service"]
-)
+ERROR_COUNT = Counter("requests_errors_total", "Total errors", ["service"])
 
 
 @app.middleware("http")
@@ -69,10 +52,7 @@ async def metrics_middleware(request: Request, call_next):
     try:
         response = await call_next(request)
 
-        REQUEST_COUNT.labels(
-            service=SERVICE_NAME,
-            endpoint=request.url.path
-        ).inc()
+        REQUEST_COUNT.labels(service=SERVICE_NAME, endpoint=request.url.path).inc()
 
         if response.status_code >= 400:
             ERROR_COUNT.labels(service=SERVICE_NAME).inc()
@@ -80,9 +60,7 @@ async def metrics_middleware(request: Request, call_next):
         return response
 
     finally:
-        REQUEST_LATENCY.labels(service=SERVICE_NAME).observe(
-            time.time() - start
-        )
+        REQUEST_LATENCY.labels(service=SERVICE_NAME).observe(time.time() - start)
 
 
 @app.get("/metrics")
@@ -94,6 +72,7 @@ def metrics():
 # BIGQUERY CLIENT
 # ─────────────────────────────────────────────
 
+
 def get_client():
     api_token = os.environ.get("API_TOKEN")
 
@@ -102,9 +81,7 @@ def get_client():
             json.loads(api_token)
         )
         return bigquery.Client(
-            credentials=credentials,
-            project=PROJECT,
-            location=LOCATION
+            credentials=credentials, project=PROJECT, location=LOCATION
         )
 
     return bigquery.Client(project=PROJECT, location=LOCATION)
@@ -113,6 +90,7 @@ def get_client():
 # ─────────────────────────────────────────────
 # DOMAIN LOGIC (REFATORADO)
 # ─────────────────────────────────────────────
+
 
 def classify_risk(prob: float) -> str:
     if prob < 0.25:
@@ -126,11 +104,11 @@ def classify_risk(prob: float) -> str:
 
 def road_factor_map(road_topology: str) -> float:
     factors = {
-        'junction': 1.3,
-        'roundabout': 1.25,
-        'curve': 1.15,
-        'traffic_signal': 1.1,
-        'straight': 0.9
+        "junction": 1.3,
+        "roundabout": 1.25,
+        "curve": 1.15,
+        "traffic_signal": 1.1,
+        "straight": 0.9,
     }
     return factors.get(road_topology.lower(), 1.0)
 
@@ -165,6 +143,7 @@ def apply_span(span, **kwargs):
 # MODELS
 # ─────────────────────────────────────────────
 
+
 class PredictRequest(BaseModel):
     latitude: float
     longitude: float
@@ -195,6 +174,7 @@ class SimulateResponse(BaseModel):
 # HEALTH
 # ─────────────────────────────────────────────
 
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
@@ -209,6 +189,7 @@ async def ready():
 # ENDPOINTS (CLEAN)
 # ─────────────────────────────────────────────
 
+
 @app.post("/accidents/predict-occurrence", response_model=PredictResponse)
 def predict_occurrence(request: PredictRequest):
     span = get_current_span()
@@ -220,7 +201,7 @@ def predict_occurrence(request: PredictRequest):
             "business.longitude": request.longitude,
             "business.hour": request.hour,
             "business.weather_condition": request.weather_condition,
-        }
+        },
     )
 
     logger.info(
@@ -230,10 +211,7 @@ def predict_occurrence(request: PredictRequest):
     try:
         client = get_client()
         sql = ml_query(
-            request.hour,
-            request.latitude,
-            request.longitude,
-            request.weather_condition
+            request.hour, request.latitude, request.longitude, request.weather_condition
         )
 
         rows = list(client.query(sql).result())
@@ -242,8 +220,7 @@ def predict_occurrence(request: PredictRequest):
         prob = ml_to_prob(severity_score)
 
         result = PredictResponse(
-            accident_probability=round(prob, 4),
-            risk_level=classify_risk(prob)
+            accident_probability=round(prob, 4), risk_level=classify_risk(prob)
         )
 
         span.set_attribute("business.accident_probability", result.accident_probability)
@@ -268,7 +245,7 @@ def simulate_risk(request: SimulateRequest):
             "business.hour": request.hour,
             "business.weather_condition": request.weather_condition,
             "business.road_topology": request.road_topology,
-        }
+        },
     )
 
     try:
@@ -276,10 +253,7 @@ def simulate_risk(request: SimulateRequest):
         client = get_client()
 
         sql = ml_query(
-            request.hour,
-            request.latitude,
-            request.longitude,
-            request.weather_condition
+            request.hour, request.latitude, request.longitude, request.weather_condition
         )
 
         rows = list(client.query(sql).result())
@@ -300,7 +274,7 @@ def simulate_risk(request: SimulateRequest):
         result = SimulateResponse(
             probability_score=round(final_prob, 4),
             predicted_severity=classify_risk(final_prob),
-            explanation=explanation
+            explanation=explanation,
         )
 
         span.set_attribute("business.final_probability", result.probability_score)
@@ -316,8 +290,6 @@ def simulate_risk(request: SimulateRequest):
 @app.get("/stats")
 def get_stats():
     client = get_client()
-    row = list(
-        client.query(f"SELECT COUNT(*) as total FROM `{TABLE}`").result()
-    )[0]
+    row = list(client.query(f"SELECT COUNT(*) as total FROM `{TABLE}`").result())[0]
 
     return {"total_accidents": row["total"]}
