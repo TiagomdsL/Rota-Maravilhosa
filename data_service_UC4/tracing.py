@@ -9,41 +9,44 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from fastapi import FastAPI
 
+
 class TraceIdFilter(logging.Filter):
     def filter(self, record):
         try:
             span = trace.get_current_span()
             if span and span.get_span_context().is_valid:
-                record.trace_id = format(span.get_span_context().trace_id, '032x')
+                record.trace_id = format(span.get_span_context().trace_id, "032x")
             else:
-                record.trace_id = 'no-trace'
+                record.trace_id = "no-trace"
         except Exception:
-            record.trace_id = 'error'
+            record.trace_id = "error"
         return True
+
 
 def setup_tracing(app: FastAPI, service_name: str):
     resource = Resource.create({SERVICE_NAME: service_name})
     provider = TracerProvider(resource=resource)
-    
+
     exporter = OTLPSpanExporter(
         endpoint="http://otel-collector.observability.svc.cluster.local:4318/v1/traces",
     )
-    
+
     provider.add_span_processor(BatchSpanProcessor(exporter))
     trace.set_tracer_provider(provider)
-    
+
     FastAPIInstrumentor.instrument_app(app)
     HTTPXClientInstrumentor().instrument()
-    
+
     logging.basicConfig(
         level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - [trace_id=%(trace_id)s] - %(message)s'
+        format="%(asctime)s - %(name)s - %(levelname)s - [trace_id=%(trace_id)s] - %(message)s",
     )
-    
+
     for handler in logging.root.handlers:
         handler.addFilter(TraceIdFilter())
-    
+
     print(f"✅ OpenTelemetry configurado para: {service_name}")
+
 
 def get_current_span():
     return trace.get_current_span()
