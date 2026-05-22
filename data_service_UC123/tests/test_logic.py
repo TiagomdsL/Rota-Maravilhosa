@@ -1,6 +1,7 @@
 # tests/test_logic.py
 import sys
 import os
+import pytest
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from main import (
@@ -48,19 +49,13 @@ def test_normalize_state_with_whitespace():
 
 
 def test_normalize_state_invalid_raises_error():
-    try:
+    with pytest.raises(ValueError, match="Invalid state: InvalidState"):
         normalize_state("InvalidState")
-        assert False, "Expected ValueError"
-    except ValueError as e:
-        assert str(e) == "Invalid state: InvalidState"
 
 
 def test_normalize_state_invalid_code_raises_error():
-    try:
+    with pytest.raises(ValueError, match="Invalid state: XX"):
         normalize_state("XX")
-        assert False, "Expected ValueError"
-    except ValueError as e:
-        assert str(e) == "Invalid state: XX"
 
 
 # =============================================================================
@@ -246,3 +241,45 @@ def test_name_to_code_reverse_mapping():
 def test_name_to_code_completeness():
     for code, name in STATE_NAMES.items():
         assert NAME_TO_CODE[name] == code
+
+
+# =============================================================================
+# PARAMETRIZED TESTS
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    "input_state,expected_code",
+    [
+        ("CA", "CA"),
+        ("ca", "CA"),
+        ("California", "CA"),
+        ("california", "CA"),
+        ("NY", "NY"),
+        ("New York", "NY"),
+        ("TX", "TX"),
+        ("Texas", "TX"),
+        ("FL", "FL"),
+        ("Florida", "FL"),
+    ],
+)
+def test_normalize_state_parametrized(input_state, expected_code):
+    """Test multiple state normalizations with a single test."""
+    assert normalize_state(input_state) == expected_code
+
+
+@pytest.mark.parametrize(
+    "invalid_state",
+    [
+        "InvalidState",
+        "XX",
+        "ZZ",
+        "Portugal",
+        "123",
+        "",
+    ],
+)
+def test_normalize_state_invalid_parametrized(invalid_state):
+    """Test multiple invalid states with a single test."""
+    with pytest.raises(ValueError, match=f"Invalid state: {invalid_state}"):
+        normalize_state(invalid_state)
