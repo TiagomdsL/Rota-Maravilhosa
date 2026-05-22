@@ -1,0 +1,40 @@
+name: CI - Data Service UC8-UC11
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'data_service_UC123/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'data_service_UC123/**'
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          cd data_service_UC123
+          pip install --quiet -r requirements.txt
+          pip install --quiet pytest flake8  # dependências de dev
+      
+      - name: Lint with flake8
+        run: |
+          cd data_service_UC123
+          flake8 . --count --statistics --ignore=E501,E402
+      
+      - name: Test with pytest
+        run: |
+          cd data_service_UC123
+          pytest tests/ -v --tb=short
