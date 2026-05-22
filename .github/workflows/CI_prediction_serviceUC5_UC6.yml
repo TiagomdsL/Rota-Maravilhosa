@@ -1,0 +1,48 @@
+# =============================================================================
+# CI - prediction-service-uc5-uc6
+# =============================================================================
+
+name: CI - prediction_service_UC5_UC6
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'prediction_service_UC5_UC6/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'prediction_service_UC5_UC6/**'
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          cd prediction_service_UC5_UC6
+          pip install --quiet -r requirements.txt
+          pip install --quiet pytest flake8  # dependências de dev
+      
+      - name: Lint with flake8
+        run: |
+          cd prediction_service_UC5_UC6
+          flake8 . \
+            --max-line-length=120 \
+            --exclude=__pycache__ \
+            --count --statistics \
+            --ignore=E501,E402
+      
+      - name: Run unit tests
+        run: |
+          cd prediction_service_UC9_UC10
+          pytest tests/ -v --tb=short

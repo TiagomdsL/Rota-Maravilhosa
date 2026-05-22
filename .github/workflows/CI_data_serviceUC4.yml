@@ -1,0 +1,48 @@
+# =============================================================================
+# CI - data-service-uc4
+# =============================================================================
+
+name: CI - data_service_UC4
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'data_service_UC4/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'data_service_UC4/**'
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          cd data_service_UC4
+          pip install --quiet -r requirements.txt
+          pip install --quiet pytest flake8  # dependências de dev
+      
+      - name: Lint with flake8
+        run: |
+          cd data_service_UC4
+          flake8 . \
+            --max-line-length=120 \
+            --exclude=__pycache__ \
+            --count --statistics \
+            --ignore=E501,E402
+      
+      - name: Run unit tests
+        run: |
+          cd data_service_UC4
+          pytest tests/ -v --tb=short

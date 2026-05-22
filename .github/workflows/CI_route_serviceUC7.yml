@@ -1,0 +1,48 @@
+# =============================================================================
+# CI - route-service-uc7
+# =============================================================================
+
+name: CI - route_service_UC7
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'route_service_UC7/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'route_service_UC7/**'
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          cd route_service_UC7
+          pip install --quiet -r requirements.txt
+          pip install --quiet pytest flake8  # dependências de dev
+      
+      - name: Lint with flake8
+        run: |
+          cd route_service_UC7
+          flake8 . \
+            --max-line-length=120 \
+            --exclude=__pycache__ \
+            --count --statistics \
+            --ignore=E501,E402
+      
+      - name: Run unit tests
+        run: |
+          cd route_service_UC7
+          pytest tests/ -v --tb=short
