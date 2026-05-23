@@ -50,6 +50,3 @@ def setup_tracing(app: FastAPI, service_name: str):
 
 def get_current_span():
     return trace.get_current_span()
-
-
-# teste

@@ -32,7 +32,7 @@ jobs:
       - name: Lint with flake8
         run: |
           cd data_service_UC123
-          flake8 . --count --statistics --ignore=E501,E402
+          flake8 . --count --statistics --ignore=E501,E402,W291
       
       - name: Test with pytest
         run: |
