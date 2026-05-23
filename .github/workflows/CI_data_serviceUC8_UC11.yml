@@ -2,11 +2,9 @@ name: CI - Data Service UC8-UC11
 
 on:
   push:
-    branches: [ main ]
     paths:
       - 'data_service_UC8_UC11/**'
   pull_request:
-    branches: [ main ]
     paths:
       - 'data_service_UC8_UC11/**'
 

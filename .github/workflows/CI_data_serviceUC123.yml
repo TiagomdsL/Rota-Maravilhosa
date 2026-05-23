@@ -2,11 +2,9 @@ name: CI - Data Service UC123
 
 on:
   push:
-    branches: [ main ]
     paths:
       - 'data_service_UC123/**'
   pull_request:
-    branches: [ main ]
     paths:
       - 'data_service_UC123/**'
 

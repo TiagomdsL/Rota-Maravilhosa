@@ -2,11 +2,9 @@ name: CI - Observabilidade
 
 on:
   push:
-    branches: [ main ]
     paths:
       - 'deployment/**'
   pull_request:
-    branches: [ main ]
     paths:
       - 'deployment/**'
 
