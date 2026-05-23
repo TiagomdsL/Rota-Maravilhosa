@@ -200,7 +200,7 @@ class SeverityInput(BaseModel):
 
 
 class SeverityResponse(BaseModel):
-    predicted_severity: int
+    predicted_severity: float
 
 
 class RiskRequest(BaseModel):
@@ -268,7 +268,7 @@ def predict_severity(request: SeverityInput):
 
         rows = list(client.query(sql).result())
 
-        predicted_severity = int(rows[0]["predicted_severity"])
+        predicted_severity = round(float(rows[0]["predicted_severity"]), 3)
 
         result = SeverityResponse(predicted_severity=predicted_severity)
 
