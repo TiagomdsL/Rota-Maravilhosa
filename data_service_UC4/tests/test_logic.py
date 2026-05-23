@@ -1,4 +1,3 @@
-from pytest import approx
 import sys
 import os
 
