@@ -44,5 +44,5 @@ jobs:
       
       - name: Run unit tests
         run: |
-          cd prediction_service_UC9_UC10
+          cd prediction_service_UC5_UC6
           pytest tests/ -v --tb=short
