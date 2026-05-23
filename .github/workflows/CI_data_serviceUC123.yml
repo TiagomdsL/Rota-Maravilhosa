@@ -1,4 +1,4 @@
-name: CI - Data Service UC8-UC11
+name: CI - Data Service UC123
 
 on:
   push:
