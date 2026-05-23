@@ -23,16 +23,56 @@ TABLE = "proj1cc-493515.accidents.accidents"
 LOCATION = "US"
 
 STATE_NAMES = {
-    "AL":"Alabama","AK":"Alaska","AZ":"Arizona","AR":"Arkansas","CA":"California",
-    "CO":"Colorado","CT":"Connecticut","DE":"Delaware","FL":"Florida","GA":"Georgia",
-    "HI":"Hawaii","ID":"Idaho","IL":"Illinois","IN":"Indiana","IA":"Iowa","KS":"Kansas",
-    "KY":"Kentucky","LA":"Louisiana","ME":"Maine","MD":"Maryland","MA":"Massachusetts",
-    "MI":"Michigan","MN":"Minnesota","MS":"Mississippi","MO":"Missouri","MT":"Montana",
-    "NE":"Nebraska","NV":"Nevada","NH":"New Hampshire","NJ":"New Jersey","NM":"New Mexico",
-    "NY":"New York","NC":"North Carolina","ND":"North Dakota","OH":"Ohio","OK":"Oklahoma",
-    "OR":"Oregon","PA":"Pennsylvania","RI":"Rhode Island","SC":"South Carolina",
-    "SD":"South Dakota","TN":"Tennessee","TX":"Texas","UT":"Utah","VT":"Vermont",
-    "VA":"Virginia","WA":"Washington","WV":"West Virginia","WI":"Wisconsin","WY":"Wyoming"
+    "AL": "Alabama",
+    "AK": "Alaska",
+    "AZ": "Arizona",
+    "AR": "Arkansas",
+    "CA": "California",
+    "CO": "Colorado",
+    "CT": "Connecticut",
+    "DE": "Delaware",
+    "FL": "Florida",
+    "GA": "Georgia",
+    "HI": "Hawaii",
+    "ID": "Idaho",
+    "IL": "Illinois",
+    "IN": "Indiana",
+    "IA": "Iowa",
+    "KS": "Kansas",
+    "KY": "Kentucky",
+    "LA": "Louisiana",
+    "ME": "Maine",
+    "MD": "Maryland",
+    "MA": "Massachusetts",
+    "MI": "Michigan",
+    "MN": "Minnesota",
+    "MS": "Mississippi",
+    "MO": "Missouri",
+    "MT": "Montana",
+    "NE": "Nebraska",
+    "NV": "Nevada",
+    "NH": "New Hampshire",
+    "NJ": "New Jersey",
+    "NM": "New Mexico",
+    "NY": "New York",
+    "NC": "North Carolina",
+    "ND": "North Dakota",
+    "OH": "Ohio",
+    "OK": "Oklahoma",
+    "OR": "Oregon",
+    "PA": "Pennsylvania",
+    "RI": "Rhode Island",
+    "SC": "South Carolina",
+    "SD": "South Dakota",
+    "TN": "Tennessee",
+    "TX": "Texas",
+    "UT": "Utah",
+    "VT": "Vermont",
+    "VA": "Virginia",
+    "WA": "Washington",
+    "WV": "West Virginia",
+    "WI": "Wisconsin",
+    "WY": "Wyoming",
 }
 NAME_TO_CODE = {v: k for k, v in STATE_NAMES.items()}
 
@@ -153,7 +193,9 @@ def build_statistics_query(state_code: str, start_date: str, end_date: str) -> s
 
 def fetch_statistics(state_code: str, start_date: str, end_date: str) -> dict:
     """Fetch accident statistics from BigQuery."""
-    logger.info(f"Fetching statistics: state={state_code}, from={start_date}, to={end_date}")
+    logger.info(
+        f"Fetching statistics: state={state_code}, from={start_date}, to={end_date}"
+    )
 
     client = get_client()
     sql = build_statistics_query(state_code, start_date, end_date)
@@ -166,7 +208,9 @@ def fetch_statistics(state_code: str, start_date: str, end_date: str) -> dict:
         "avg_severity": round(row["avg_severity"] or 0, 2),
     }
 
-    logger.info(f"Statistics result: {result['total_accidents']} accidents, severity={result['avg_severity']}")
+    logger.info(
+        f"Statistics result: {result['total_accidents']} accidents, severity={result['avg_severity']}"
+    )
 
     return result
 
@@ -241,7 +285,9 @@ def fetch_temporal_analysis(city: str, day_of_week: Optional[str]) -> list:
 
     client = get_client()
     sql = build_temporal_analysis_query(city, day_of_week)
-    hour_map = {int(r["hour"]): int(r["accident_count"]) for r in client.query(sql).result()}
+    hour_map = {
+        int(r["hour"]): int(r["accident_count"]) for r in client.query(sql).result()
+    }
     result = [{"hour": h, "accident_count": hour_map.get(h, 0)} for h in range(24)]
 
     logger.info(f"Temporal analysis completed for {city}")
@@ -302,7 +348,9 @@ async def weather_analysis(state: Optional[str] = Query(None)):
 
 
 @app.get("/accidents/temporal-analysis")
-async def temporal_analysis(city: str = Query(...), day_of_week: Optional[str] = Query(None)):
+async def temporal_analysis(
+    city: str = Query(...), day_of_week: Optional[str] = Query(None)
+):
     span = get_current_span()
     span.set_attribute("business.city", city)
 
