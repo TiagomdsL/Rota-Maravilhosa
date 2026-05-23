@@ -362,3 +362,6 @@ async def temporal_analysis(
     result = fetch_temporal_analysis(city, day_of_week)
 
     return result
+
+
+# teste
