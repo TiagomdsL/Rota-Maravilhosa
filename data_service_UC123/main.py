@@ -168,10 +168,15 @@ def normalize_state(state: str) -> str:
     state = state.strip()
 
     if len(state) == 2:
-        return state.upper()
+        code = state.upper()
+        if code in STATE_NAMES:
+            return code
+        raise ValueError(f"Invalid state: {state}")
 
-    if state in NAME_TO_CODE:
-        return NAME_TO_CODE[state]
+    state_title = state.title()
+
+    if state_title in NAME_TO_CODE:
+        return NAME_TO_CODE[state_title]
 
     raise ValueError(f"Invalid state: {state}")
 
@@ -222,15 +227,15 @@ def fetch_statistics(state_code: str, start_date: str, end_date: str) -> dict:
 
 def build_weather_analysis_query(state_code: Optional[str]) -> str:
     """Build SQL query for weather analysis."""
-    where = f"WHERE State = '{state_code}'" if state_code else ""
+    where_clause = f"WHERE State = '{state_code}'" if state_code else ""
 
     return f"""
-        SELECT 
-            Weather_Condition, 
-            COUNT(*) as accident_count, 
+        SELECT
+            Weather_Condition,
+            COUNT(*) as accident_count,
             AVG(Severity) as avg_severity
         FROM `{TABLE}`
-        {where}
+        {where_clause}
         GROUP BY Weather_Condition
         HAVING Weather_Condition IS NOT NULL
         ORDER BY accident_count DESC
@@ -362,6 +367,3 @@ async def temporal_analysis(
     result = fetch_temporal_analysis(city, day_of_week)
 
     return result
-
-
-# teste
