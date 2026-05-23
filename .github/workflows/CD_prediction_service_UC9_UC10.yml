@@ -1,0 +1,378 @@
+name: CD — prediction-service-uc9-uc10
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "prediction_service_UC9_UC10/**"
+
+env:
+  IMAGE: prediction-service-uc9-uc10
+  PORT: 8008
+
+jobs:
+  build-and-smoke-test:
+    name: Build + Smoke Test endpoints
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. CHECKOUT ──────────────────────────────────────────────────────
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      # ── 2. BUILD DA IMAGEM ───────────────────────────────────────────────
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t ${{ env.IMAGE }}:${{ github.sha }} \
+            -t ${{ env.IMAGE }}:latest \
+            ./prediction_service_UC9_UC10
+
+      # ── 3. ARRANCAR O CONTENTOR ──────────────────────────────────────────
+      # Os endpoints /health, /ready, /metrics não chamam BQ → funcionam sem credenciais.
+      # Os endpoints de predição são testados com mock Python nos passos seguintes.
+      - name: Arrancar contentor
+        run: |
+          docker run -d \
+            --name ${{ env.IMAGE }} \
+            -p ${{ env.PORT }}:${{ env.PORT }} \
+            -e API_TOKEN="" \
+            -e OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4318/v1/traces" \
+            ${{ env.IMAGE }}:${{ github.sha }}
+
+      # ── 4. AGUARDAR O SERVIÇO ESTAR PRONTO ──────────────────────────────
+      - name: Aguardar serviço iniciar
+        run: |
+          for i in $(seq 1 20); do
+            if curl -sf http://localhost:${{ env.PORT }}/health > /dev/null; then
+              echo "Serviço disponível após ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Timeout: serviço não respondeu"
+          docker logs ${{ env.IMAGE }}
+          exit 1
+
+      # ── 5. SMOKE TESTS — ENDPOINTS SEM BQ ───────────────────────────────
+
+      - name: "GET /health → 200 + {status: ok}"
+        run: |
+          BODY=$(curl -sf http://localhost:${{ env.PORT }}/health)
+          echo "Response: $BODY"
+          echo "$BODY" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          assert d.get('status') == 'ok', f'Esperado ok, obtido: {d}'
+          print('OK')
+          "
+
+      - name: "GET /ready → 200 + {status: ok}"
+        run: |
+          BODY=$(curl -sf http://localhost:${{ env.PORT }}/ready)
+          echo "Response: $BODY"
+          echo "$BODY" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          assert d.get('status') == 'ok', f'Esperado ok, obtido: {d}'
+          print('OK')
+          "
+
+      - name: "GET /metrics → 200 + text/plain + counters presentes"
+        run: |
+          RESPONSE=$(curl -sf -D - http://localhost:${{ env.PORT }}/metrics)
+          echo "$RESPONSE" | grep -i "text/plain" || \
+            { echo "FALHOU: content-type errado"; exit 1; }
+          echo "$RESPONSE" | grep "requests_total" || \
+            { echo "FALHOU: metric requests_total ausente"; exit 1; }
+          echo "$RESPONSE" | grep "request_latency_seconds" || \
+            { echo "FALHOU: metric request_latency_seconds ausente"; exit 1; }
+          echo "OK"
+
+      # ── 6. SMOKE TESTS — ENDPOINTS COM BQ (mock Python) ─────────────────
+
+      - name: Instalar dependências para smoke tests BQ
+        run: |
+          pip install fastapi httpx pytest \
+            google-cloud-bigquery google-auth \
+            prometheus-client \
+            opentelemetry-api opentelemetry-sdk \
+            opentelemetry-exporter-otlp-proto-http \
+            opentelemetry-instrumentation-fastapi \
+            opentelemetry-instrumentation-httpx \
+            --quiet
+
+      - name: "POST /accidents/predict-occurrence — caso normal → 200 + campos correctos"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import patch, MagicMock
+
+          tracing = MagicMock()
+          tracing.setup_tracing = MagicMock()
+          tracing.get_current_span = MagicMock(return_value=MagicMock())
+          sys.modules["tracing"] = tracing
+
+          sys.path.insert(0, "prediction_service_UC9_UC10")
+          from main import app
+          from fastapi.testclient import TestClient
+
+          # Simula uma Row BQ com predicted_has_accident = 0.4
+          row = MagicMock()
+          row.__getitem__ = lambda s, k: 0.4 if k == "accident_probability" else None
+          mock_client = MagicMock()
+          mock_client.query.return_value.result.return_value = [row]
+
+          payload = {
+              "latitude": 34.05,
+              "longitude": -118.24,
+              "hour": 8,
+              "weather_condition": "Clear"
+          }
+
+          with patch("main.get_client", return_value=mock_client):
+              client = TestClient(app)
+              r = client.post("/accidents/predict-occurrence", json=payload)
+              assert r.status_code == 200, f"Status: {r.status_code} — {r.text}"
+              data = r.json()
+              assert "accident_probability" in data, f"Campo ausente: {data}"
+              assert "risk_level" in data,           f"Campo ausente: {data}"
+              assert isinstance(data["accident_probability"], float)
+              assert data["risk_level"] in ("Low", "Medium", "High", "Critical")
+              print(f"OK — predict-occurrence: prob={data['accident_probability']}, level={data['risk_level']}")
+          EOF
+
+      - name: "POST /accidents/predict-occurrence — hour inválido (25) → 422"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import MagicMock
+
+          tracing = MagicMock()
+          tracing.setup_tracing = MagicMock()
+          tracing.get_current_span = MagicMock(return_value=MagicMock())
+          sys.modules["tracing"] = tracing
+
+          sys.path.insert(0, "prediction_service_UC9_UC10")
+          from main import app
+          from fastapi.testclient import TestClient
+
+          payload = {
+              "latitude": 34.05,
+              "longitude": -118.24,
+              "hour": 25,           # inválido: Field(ge=0, le=23)
+              "weather_condition": "Clear"
+          }
+
+          client = TestClient(app)
+          r = client.post("/accidents/predict-occurrence", json=payload)
+          assert r.status_code == 422, f"Esperado 422, obtido {r.status_code}"
+          print("OK — hour=25 → 422")
+          EOF
+
+      - name: "POST /accidents/predict-occurrence — body em falta → 422"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import MagicMock
+
+          tracing = MagicMock()
+          tracing.setup_tracing = MagicMock()
+          tracing.get_current_span = MagicMock(return_value=MagicMock())
+          sys.modules["tracing"] = tracing
+
+          sys.path.insert(0, "prediction_service_UC9_UC10")
+          from main import app
+          from fastapi.testclient import TestClient
+
+          client = TestClient(app)
+          r = client.post("/accidents/predict-occurrence", json={})
+          assert r.status_code == 422, f"Esperado 422, obtido {r.status_code}"
+          print("OK — body vazio → 422")
+          EOF
+
+      - name: "POST /accidents/predict-occurrence — BQ falha → 500"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import patch, MagicMock
+
+          tracing = MagicMock()
+          tracing.setup_tracing = MagicMock()
+          tracing.get_current_span = MagicMock(return_value=MagicMock())
+          sys.modules["tracing"] = tracing
+
+          sys.path.insert(0, "prediction_service_UC9_UC10")
+          from main import app
+          from fastapi.testclient import TestClient
+
+          mock_client = MagicMock()
+          mock_client.query.side_effect = Exception("BQ unavailable")
+
+          payload = {
+              "latitude": 34.05,
+              "longitude": -118.24,
+              "hour": 8,
+              "weather_condition": "Rain"
+          }
+
+          with patch("main.get_client", return_value=mock_client):
+              client = TestClient(app, raise_server_exceptions=False)
+              r = client.post("/accidents/predict-occurrence", json=payload)
+              assert r.status_code == 500, f"Esperado 500, obtido {r.status_code}"
+              print("OK — BQ falha → 500")
+          EOF
+
+      - name: "POST /accidents/simulate-risk — road_topology junction → fator 1.3 aplicado"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import patch, MagicMock
+
+          tracing = MagicMock()
+          tracing.setup_tracing = MagicMock()
+          tracing.get_current_span = MagicMock(return_value=MagicMock())
+          sys.modules["tracing"] = tracing
+
+          sys.path.insert(0, "prediction_service_UC9_UC10")
+          from main import app
+          from fastapi.testclient import TestClient
+
+          # base_prob = 0.4 → com junction (×1.3) → min(0.95, 0.52)
+          row = MagicMock()
+          row.__getitem__ = lambda s, k: 0.4 if k == "accident_probability" else None
+          mock_client = MagicMock()
+          mock_client.query.return_value.result.return_value = [row]
+
+          payload = {
+              "latitude": 34.05,
+              "longitude": -118.24,
+              "hour": 8,
+              "weather_condition": "Clear",
+              "road_topology": "junction"
+          }
+
+          with patch("main.get_client", return_value=mock_client):
+              client = TestClient(app)
+              r = client.post("/accidents/simulate-risk", json=payload)
+              assert r.status_code == 200, f"Status: {r.status_code} — {r.text}"
+              data = r.json()
+              assert "probability_score" in data
+              assert "predicted_severity" in data
+              assert "explanation" in data
+              assert isinstance(data["explanation"], list)
+              # fator junction (1.3) → prob final > prob base
+              assert data["probability_score"] > 0.4, \
+                  f"Esperado >0.4 com junction, obtido {data['probability_score']}"
+              print(f"OK — simulate-risk junction: score={data['probability_score']}, severity={data['predicted_severity']}")
+          EOF
+
+      - name: "POST /accidents/simulate-risk — todos road_topology conhecidos → 200"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import patch, MagicMock
+
+          tracing = MagicMock()
+          tracing.setup_tracing = MagicMock()
+          tracing.get_current_span = MagicMock(return_value=MagicMock())
+          sys.modules["tracing"] = tracing
+
+          sys.path.insert(0, "prediction_service_UC9_UC10")
+          from main import app
+          from fastapi.testclient import TestClient
+
+          row = MagicMock()
+          row.__getitem__ = lambda s, k: 0.3 if k == "accident_probability" else None
+          mock_client = MagicMock()
+          mock_client.query.return_value.result.return_value = [row]
+
+          topologies = ["junction", "roundabout", "curve", "traffic_signal", "straight", "unknown_topology"]
+
+          with patch("main.get_client", return_value=mock_client):
+              client = TestClient(app)
+              for topo in topologies:
+                  payload = {
+                      "latitude": 34.05,
+                      "longitude": -118.24,
+                      "hour": 10,
+                      "weather_condition": "Clear",
+                      "road_topology": topo
+                  }
+                  r = client.post("/accidents/simulate-risk", json=payload)
+                  assert r.status_code == 200, f"{topo}: status {r.status_code}"
+                  print(f"OK — simulate-risk topology={topo}: {r.json()['probability_score']}")
+          EOF
+
+      - name: "POST /accidents/simulate-risk — body incompleto → 422"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import MagicMock
+
+          tracing = MagicMock()
+          tracing.setup_tracing = MagicMock()
+          tracing.get_current_span = MagicMock(return_value=MagicMock())
+          sys.modules["tracing"] = tracing
+
+          sys.path.insert(0, "prediction_service_UC9_UC10")
+          from main import app
+          from fastapi.testclient import TestClient
+
+          client = TestClient(app)
+          # road_topology em falta
+          r = client.post("/accidents/simulate-risk", json={
+              "latitude": 34.05,
+              "longitude": -118.24,
+              "hour": 8,
+              "weather_condition": "Clear"
+          })
+          assert r.status_code == 422, f"Esperado 422, obtido {r.status_code}"
+          print("OK — simulate-risk sem road_topology → 422")
+          EOF
+
+      - name: "POST /accidents/simulate-risk — BQ falha → 500"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import patch, MagicMock
+
+          tracing = MagicMock()
+          tracing.setup_tracing = MagicMock()
+          tracing.get_current_span = MagicMock(return_value=MagicMock())
+          sys.modules["tracing"] = tracing
+
+          sys.path.insert(0, "prediction_service_UC9_UC10")
+          from main import app
+          from fastapi.testclient import TestClient
+
+          mock_client = MagicMock()
+          mock_client.query.side_effect = Exception("BQ down")
+
+          payload = {
+              "latitude": 34.05,
+              "longitude": -118.24,
+              "hour": 8,
+              "weather_condition": "Clear",
+              "road_topology": "junction"
+          }
+
+          with patch("main.get_client", return_value=mock_client):
+              client = TestClient(app, raise_server_exceptions=False)
+              r = client.post("/accidents/simulate-risk", json=payload)
+              assert r.status_code == 500, f"Esperado 500, obtido {r.status_code}"
+              print("OK — simulate-risk BQ falha → 500")
+          EOF
+
+      # ── 7. LOGS EM CASO DE FALHA ─────────────────────────────────────────
+      - name: Logs do contentor (em caso de falha)
+        if: failure()
+        run: docker logs ${{ env.IMAGE }}
+
+      # ── 8. CLEANUP ───────────────────────────────────────────────────────
+      - name: Parar e remover contentor
+        if: always()
+        run: |
+          docker stop ${{ env.IMAGE }} || true
+          docker rm   ${{ env.IMAGE }} || true
