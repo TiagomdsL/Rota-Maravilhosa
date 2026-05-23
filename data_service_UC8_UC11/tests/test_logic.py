@@ -33,7 +33,7 @@ def test_build_hotspots_query_with_state():
     assert "LIMIT 15" in query
 
 
-def test_build_hotspots_query_with_state():
+def test_build_hotspots_query_with_state2():
     query = build_hotspots_query(city=None, state="TX", limit=10)
 
     assert "State = 'TX'" in query

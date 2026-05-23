@@ -56,7 +56,7 @@ def test_ml_query2():
     assert "ML.PREDICT" in q
 
 
-def test_ml_query3():
+def test_ml_query4():
     q = ml_query(22, 41.1579, -8.6291, "fog")
 
     assert "22 as hour" in q

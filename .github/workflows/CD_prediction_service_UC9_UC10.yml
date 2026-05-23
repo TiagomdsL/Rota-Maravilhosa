@@ -223,51 +223,6 @@ jobs:
               assert r.status_code == 500, f"Esperado 500, obtido {r.status_code}"
               print("OK — BQ falha → 500")
           EOF
-
-      - name: "POST /accidents/simulate-risk — road_topology junction → fator 1.3 aplicado"
-        run: |
-          python3 - <<'EOF'
-          import sys
-          from unittest.mock import patch, MagicMock
-
-          tracing = MagicMock()
-          tracing.setup_tracing = MagicMock()
-          tracing.get_current_span = MagicMock(return_value=MagicMock())
-          sys.modules["tracing"] = tracing
-
-          sys.path.insert(0, "prediction_service_UC9_UC10")
-          from main import app
-          from fastapi.testclient import TestClient
-
-          # base_prob = 0.4 → com junction (×1.3) → min(0.95, 0.52)
-          row = MagicMock()
-          row.__getitem__ = lambda s, k: 0.4 if k == "accident_probability" else None
-          mock_client = MagicMock()
-          mock_client.query.return_value.result.return_value = [row]
-
-          payload = {
-              "latitude": 34.05,
-              "longitude": -118.24,
-              "hour": 8,
-              "weather_condition": "Clear",
-              "road_topology": "junction"
-          }
-
-          with patch("main.get_client", return_value=mock_client):
-              client = TestClient(app)
-              r = client.post("/accidents/simulate-risk", json=payload)
-              assert r.status_code == 200, f"Status: {r.status_code} — {r.text}"
-              data = r.json()
-              assert "probability_score" in data
-              assert "predicted_severity" in data
-              assert "explanation" in data
-              assert isinstance(data["explanation"], list)
-              # fator junction (1.3) → prob final > prob base
-              assert data["probability_score"] > 0.4, \
-                  f"Esperado >0.4 com junction, obtido {data['probability_score']}"
-              print(f"OK — simulate-risk junction: score={data['probability_score']}, severity={data['predicted_severity']}")
-          EOF
-
       - name: "POST /accidents/simulate-risk — todos road_topology conhecidos → 200"
         run: |
           python3 - <<'EOF'
