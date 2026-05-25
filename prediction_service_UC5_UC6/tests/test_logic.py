@@ -35,12 +35,12 @@ def test_classify_severity():
 
 def test_severity_prediction_query():
     query = severity_prediction_query(
-        10.5,
+        11.0,
         0.2,
         "Rain",
     )
 
-    assert "10.5 as visibility" in query
+    assert "11.0 as visibility" in query
     assert "0.2 as precipitation" in query
     assert "Rain" in query
     assert "ML.PREDICT" in query
