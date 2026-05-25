@@ -1,0 +1,517 @@
+name: CD — data-service-uc123
+
+# Corre apenas em push para main e só quando há alterações neste serviço
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "data_service_UC123/**"
+
+env:
+  IMAGE: data-service-uc123
+  PORT: 8008
+
+jobs:
+  build-and-smoke-test:
+    name: Build + Smoke Test endpoints
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. CHECKOUT ──────────────────────────────────────────────────────
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      # ── 2. BUILD DA IMAGEM ───────────────────────────────────────────────
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t ${{ env.IMAGE }}:${{ github.sha }} \
+            -t ${{ env.IMAGE }}:latest \
+            ./data_service_UC123
+
+      # ── 3. ARRANCAR O CONTENTOR ──────────────────────────────────────────
+      # API_TOKEN vazio → o serviço usa ADC; como os endpoints de health/ready/metrics
+      # não chamam BigQuery, o contentor fica saudável sem credenciais reais.
+      # Os endpoints que chamam BQ (statistics/by-state, weather-analysis,
+      # temporal-analysis) são testados com um mock externo (ver passo 6).
+      - name: Arrancar contentor
+        run: |
+          docker run -d \
+            --name ${{ env.IMAGE }} \
+            -p ${{ env.PORT }}:${{ env.PORT }} \
+            -e API_TOKEN="" \
+            -e OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4318/v1/traces" \
+            ${{ env.IMAGE }}:${{ github.sha }}
+
+      # ── 4. AGUARDAR O SERVIÇO ESTAR PRONTO ──────────────────────────────
+      - name: Aguardar serviço iniciar
+        run: |
+          echo "A aguardar que o serviço responda em :${{ env.PORT }}..."
+          for i in $(seq 1 20); do
+            if curl -sf http://localhost:${{ env.PORT }}/health > /dev/null; then
+              echo "Serviço disponível após ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Timeout: serviço não respondeu"
+          docker logs ${{ env.IMAGE }}
+          exit 1
+
+      # ── 5. SMOKE TESTS — ENDPOINTS SEM BQ ───────────────────────────────
+
+      - name: "GET /health → 200 + {status: ok}"
+        run: |
+          BODY=$(curl -sf http://localhost:${{ env.PORT }}/health)
+          echo "Response: $BODY"
+          echo "$BODY" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          assert d.get('status') == 'ok', f'Esperado ok, obtido: {d}'
+          print('OK')
+          "
+
+      - name: "GET /ready → 200 + {status: ok}"
+        run: |
+          BODY=$(curl -sf http://localhost:${{ env.PORT }}/ready)
+          echo "Response: $BODY"
+          echo "$BODY" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          assert d.get('status') == 'ok', f'Esperado ok, obtido: {d}'
+          print('OK')
+          "
+
+      - name: "GET /metrics → 200 + content-type text/plain + counters presentes"
+        run: |
+          RESPONSE=$(curl -sf -D - http://localhost:${{ env.PORT }}/metrics)
+          echo "$RESPONSE" | grep -i "text/plain" || \
+            { echo "FALHOU: content-type errado"; exit 1; }
+          echo "$RESPONSE" | grep "requests_total" || \
+            { echo "FALHOU: metric requests_total ausente"; exit 1; }
+          echo "$RESPONSE" | grep "request_latency_seconds" || \
+            { echo "FALHOU: metric request_latency_seconds ausente"; exit 1; }
+          echo "OK"
+
+      # ── 6. SMOKE TESTS — ENDPOINTS COM BQ (mock via patch) ───────────────
+      # Usamos um script Python ad-hoc que arranca o app com o BQ mockado
+      # e faz pedidos HTTP reais contra ele — sem precisar de credenciais GCP.
+
+      - name: Instalar dependências para smoke tests BQ
+        run: |
+          pip install fastapi httpx pytest pytest-asyncio \
+            google-cloud-bigquery google-auth \
+            prometheus-client \
+            opentelemetry-api opentelemetry-sdk \
+            opentelemetry-exporter-otlp-proto-http \
+            opentelemetry-instrumentation-fastapi \
+            opentelemetry-instrumentation-httpx \
+            --quiet
+
+      # ── /accidents/statistics/by-state ───────────────────────────────────
+
+      - name: "GET /accidents/statistics/by-state?state=CA&start_date=...&end_date=... → 200 + campos correctos"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import patch, MagicMock
+
+          tracing = MagicMock()
+          tracing.setup_tracing = MagicMock()
+          tracing.get_current_span = MagicMock(return_value=MagicMock())
+          sys.modules["tracing"] = tracing
+
+          sys.path.insert(0, "data_service_UC123")
+          from main import app
+          from fastapi.testclient import TestClient
+
+          def make_row(**kw):
+              r = MagicMock()
+              r.__getitem__ = lambda s, k: kw[k]
+              r.keys = lambda: kw.keys()
+              return r
+
+          rows = [make_row(total_accidents=1500, avg_severity=2.4)]
+          mock_client = MagicMock()
+          mock_client.query.return_value.result.return_value = rows
+
+          with patch("main.get_client", return_value=mock_client):
+              client = TestClient(app)
+              r = client.get("/accidents/statistics/by-state?state=CA&start_date=2021-01-01&end_date=2021-12-31")
+              assert r.status_code == 200, f"Status: {r.status_code}"
+              data = r.json()
+              assert "state" in data,            "campo 'state' ausente"
+              assert "state_name" in data,       "campo 'state_name' ausente"
+              assert "total_accidents" in data,  "campo 'total_accidents' ausente"
+              assert "avg_severity" in data,     "campo 'avg_severity' ausente"
+              assert data["state"] == "CA"
+              assert data["state_name"] == "California"
+              print("OK — /accidents/statistics/by-state?state=CA")
+          EOF
+
+      - name: "GET /accidents/statistics/by-state — state por nome completo → 200"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import patch, MagicMock
+
+          tracing = MagicMock()
+          tracing.setup_tracing = MagicMock()
+          tracing.get_current_span = MagicMock(return_value=MagicMock())
+          sys.modules["tracing"] = tracing
+
+          sys.path.insert(0, "data_service_UC123")
+          from main import app
+          from fastapi.testclient import TestClient
+
+          def make_row(**kw):
+              r = MagicMock()
+              r.__getitem__ = lambda s, k: kw[k]
+              r.keys = lambda: kw.keys()
+              return r
+
+          rows = [make_row(total_accidents=800, avg_severity=2.1)]
+          mock_client = MagicMock()
+          mock_client.query.return_value.result.return_value = rows
+
+          with patch("main.get_client", return_value=mock_client):
+              client = TestClient(app)
+              r = client.get("/accidents/statistics/by-state?state=California&start_date=2021-01-01&end_date=2021-12-31")
+              assert r.status_code == 200, f"Status: {r.status_code}"
+              data = r.json()
+              assert data["state"] == "CA", f"Esperado CA, obtido {data['state']}"
+              print("OK — /accidents/statistics/by-state?state=California (nome completo)")
+          EOF
+
+      - name: "GET /accidents/statistics/by-state — state inválido → 400"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import MagicMock
+
+          tracing = MagicMock()
+          tracing.setup_tracing = MagicMock()
+          tracing.get_current_span = MagicMock(return_value=MagicMock())
+          sys.modules["tracing"] = tracing
+
+          sys.path.insert(0, "data_service_UC123")
+          from main import app
+          from fastapi.testclient import TestClient
+
+          client = TestClient(app, raise_server_exceptions=False)
+          r = client.get("/accidents/statistics/by-state?state=XX&start_date=2021-01-01&end_date=2021-12-31")
+          assert r.status_code == 400, f"Esperado 400, obtido {r.status_code}"
+          print("OK — /accidents/statistics/by-state state inválido → 400")
+          EOF
+
+      - name: "GET /accidents/statistics/by-state — parâmetros em falta → 422"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import MagicMock
+
+          tracing = MagicMock()
+          tracing.setup_tracing = MagicMock()
+          tracing.get_current_span = MagicMock(return_value=MagicMock())
+          sys.modules["tracing"] = tracing
+
+          sys.path.insert(0, "data_service_UC123")
+          from main import app
+          from fastapi.testclient import TestClient
+
+          client = TestClient(app)
+          r = client.get("/accidents/statistics/by-state?state=CA")
+          assert r.status_code == 422, f"Esperado 422, obtido {r.status_code}"
+          print("OK — /accidents/statistics/by-state sem datas → 422")
+          EOF
+
+      - name: "GET /accidents/statistics/by-state — BQ falha → 500"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import patch, MagicMock
+
+          tracing = MagicMock()
+          tracing.setup_tracing = MagicMock()
+          tracing.get_current_span = MagicMock(return_value=MagicMock())
+          sys.modules["tracing"] = tracing
+
+          sys.path.insert(0, "data_service_UC123")
+          from main import app
+          from fastapi.testclient import TestClient
+
+          mock_client = MagicMock()
+          mock_client.query.side_effect = Exception("BQ connection failed")
+
+          with patch("main.get_client", return_value=mock_client):
+              client = TestClient(app, raise_server_exceptions=False)
+              r = client.get("/accidents/statistics/by-state?state=CA&start_date=2021-01-01&end_date=2021-12-31")
+              assert r.status_code == 500, f"Esperado 500, obtido {r.status_code}"
+              print("OK — /accidents/statistics/by-state erro BQ → 500")
+          EOF
+
+      # ── /accidents/weather-analysis ──────────────────────────────────────
+
+      - name: "GET /accidents/weather-analysis — sem filtros → 200 + lista"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import patch, MagicMock
+
+          tracing = MagicMock()
+          tracing.setup_tracing = MagicMock()
+          tracing.get_current_span = MagicMock(return_value=MagicMock())
+          sys.modules["tracing"] = tracing
+
+          sys.path.insert(0, "data_service_UC123")
+          from main import app
+          from fastapi.testclient import TestClient
+
+          def make_row(**kw):
+              r = MagicMock()
+              r.__getitem__ = lambda s, k: kw[k]
+              r.keys = lambda: kw.keys()
+              return r
+
+          rows = [
+              make_row(Weather_Condition="Clear", accident_count=3000, avg_severity=2.0),
+              make_row(Weather_Condition="Rain",  accident_count=1500, avg_severity=2.8),
+          ]
+          mock_client = MagicMock()
+          mock_client.query.return_value.result.return_value = rows
+
+          with patch("main.get_client", return_value=mock_client):
+              client = TestClient(app)
+              r = client.get("/accidents/weather-analysis")
+              assert r.status_code == 200, f"Status: {r.status_code}"
+              data = r.json()
+              assert isinstance(data, list),             "Esperava lista"
+              assert len(data) == 2
+              assert "weather_condition" in data[0],    "campo 'weather_condition' ausente"
+              assert "accident_count" in data[0],       "campo 'accident_count' ausente"
+              assert "avg_severity" in data[0],         "campo 'avg_severity' ausente"
+              print("OK — /accidents/weather-analysis sem filtros")
+          EOF
+
+      - name: "GET /accidents/weather-analysis?state=TX → 200 + WHERE na query"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import patch, MagicMock
+
+          tracing = MagicMock()
+          tracing.setup_tracing = MagicMock()
+          tracing.get_current_span = MagicMock(return_value=MagicMock())
+          sys.modules["tracing"] = tracing
+
+          sys.path.insert(0, "data_service_UC123")
+          from main import app
+          from fastapi.testclient import TestClient
+
+          def make_row(**kw):
+              r = MagicMock()
+              r.__getitem__ = lambda s, k: kw[k]
+              r.keys = lambda: kw.keys()
+              return r
+
+          rows = [make_row(Weather_Condition="Fog", accident_count=200, avg_severity=3.1)]
+          mock_client = MagicMock()
+          mock_client.query.return_value.result.return_value = rows
+
+          with patch("main.get_client", return_value=mock_client):
+              client = TestClient(app)
+              r = client.get("/accidents/weather-analysis?state=TX")
+              assert r.status_code == 200, f"Status: {r.status_code}"
+              sql = mock_client.query.call_args[0][0]
+              assert "TX" in sql, "state TX não está na query"
+              print("OK — /accidents/weather-analysis?state=TX WHERE presente")
+          EOF
+
+      - name: "GET /accidents/weather-analysis — state inválido → 400"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import MagicMock
+
+          tracing = MagicMock()
+          tracing.setup_tracing = MagicMock()
+          tracing.get_current_span = MagicMock(return_value=MagicMock())
+          sys.modules["tracing"] = tracing
+
+          sys.path.insert(0, "data_service_UC123")
+          from main import app
+          from fastapi.testclient import TestClient
+
+          client = TestClient(app, raise_server_exceptions=False)
+          r = client.get("/accidents/weather-analysis?state=ZZ")
+          assert r.status_code == 400, f"Esperado 400, obtido {r.status_code}"
+          print("OK — /accidents/weather-analysis state inválido → 400")
+          EOF
+
+      - name: "GET /accidents/weather-analysis — BQ falha → 500"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import patch, MagicMock
+
+          tracing = MagicMock()
+          tracing.setup_tracing = MagicMock()
+          tracing.get_current_span = MagicMock(return_value=MagicMock())
+          sys.modules["tracing"] = tracing
+
+          sys.path.insert(0, "data_service_UC123")
+          from main import app
+          from fastapi.testclient import TestClient
+
+          mock_client = MagicMock()
+          mock_client.query.side_effect = Exception("BQ timeout")
+
+          with patch("main.get_client", return_value=mock_client):
+              client = TestClient(app, raise_server_exceptions=False)
+              r = client.get("/accidents/weather-analysis")
+              assert r.status_code == 500, f"Esperado 500, obtido {r.status_code}"
+              print("OK — /accidents/weather-analysis erro BQ → 500")
+          EOF
+
+      # ── /accidents/temporal-analysis ─────────────────────────────────────
+
+      - name: "GET /accidents/temporal-analysis?city=Miami → 200 + 24 horas"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import patch, MagicMock
+
+          tracing = MagicMock()
+          tracing.setup_tracing = MagicMock()
+          tracing.get_current_span = MagicMock(return_value=MagicMock())
+          sys.modules["tracing"] = tracing
+
+          sys.path.insert(0, "data_service_UC123")
+          from main import app
+          from fastapi.testclient import TestClient
+
+          def make_row(**kw):
+              r = MagicMock()
+              r.__getitem__ = lambda s, k: kw[k]
+              r.keys = lambda: kw.keys()
+              return r
+
+          # BQ devolve apenas algumas horas; o endpoint deve preencher as 24
+          rows = [
+              make_row(hour=8,  accident_count=45),
+              make_row(hour=17, accident_count=90),
+          ]
+          mock_client = MagicMock()
+          mock_client.query.return_value.result.return_value = rows
+
+          with patch("main.get_client", return_value=mock_client):
+              client = TestClient(app)
+              r = client.get("/accidents/temporal-analysis?city=Miami")
+              assert r.status_code == 200, f"Status: {r.status_code}"
+              data = r.json()
+              assert isinstance(data, list),         "Esperava lista"
+              assert len(data) == 24,                f"Esperava 24 entradas, obteve {len(data)}"
+              assert "hour" in data[0],              "campo 'hour' ausente"
+              assert "accident_count" in data[0],    "campo 'accident_count' ausente"
+              hours = [d["hour"] for d in data]
+              assert hours == list(range(24)),       "horas fora de ordem ou incompletas"
+              # horas sem dados devem ter 0
+              zero_hours = [d for d in data if d["hour"] not in (8, 17)]
+              assert all(d["accident_count"] == 0 for d in zero_hours), \
+                  "horas sem dados devem ter accident_count=0"
+              print("OK — /accidents/temporal-analysis?city=Miami 24h completas")
+          EOF
+
+      - name: "GET /accidents/temporal-analysis?city=Miami&day_of_week=Monday → 200 + filtro na query"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import patch, MagicMock
+
+          tracing = MagicMock()
+          tracing.setup_tracing = MagicMock()
+          tracing.get_current_span = MagicMock(return_value=MagicMock())
+          sys.modules["tracing"] = tracing
+
+          sys.path.insert(0, "data_service_UC123")
+          from main import app
+          from fastapi.testclient import TestClient
+
+          def make_row(**kw):
+              r = MagicMock()
+              r.__getitem__ = lambda s, k: kw[k]
+              r.keys = lambda: kw.keys()
+              return r
+
+          rows = [make_row(hour=9, accident_count=30)]
+          mock_client = MagicMock()
+          mock_client.query.return_value.result.return_value = rows
+
+          with patch("main.get_client", return_value=mock_client):
+              client = TestClient(app)
+              r = client.get("/accidents/temporal-analysis?city=Miami&day_of_week=Monday")
+              assert r.status_code == 200, f"Status: {r.status_code}"
+              sql = mock_client.query.call_args[0][0]
+              assert "Miami"  in sql,    "city não está na query"
+              assert "Monday" in sql,    "day_of_week não está na query"
+              print("OK — /accidents/temporal-analysis com day_of_week filtro na query")
+          EOF
+
+      - name: "GET /accidents/temporal-analysis — city em falta → 422"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import MagicMock
+
+          tracing = MagicMock()
+          tracing.setup_tracing = MagicMock()
+          tracing.get_current_span = MagicMock(return_value=MagicMock())
+          sys.modules["tracing"] = tracing
+
+          sys.path.insert(0, "data_service_UC123")
+          from main import app
+          from fastapi.testclient import TestClient
+
+          client = TestClient(app)
+          r = client.get("/accidents/temporal-analysis")
+          assert r.status_code == 422, f"Esperado 422, obtido {r.status_code}"
+          print("OK — /accidents/temporal-analysis sem city → 422")
+          EOF
+
+      - name: "GET /accidents/temporal-analysis — BQ falha → 500"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import patch, MagicMock
+
+          tracing = MagicMock()
+          tracing.setup_tracing = MagicMock()
+          tracing.get_current_span = MagicMock(return_value=MagicMock())
+          sys.modules["tracing"] = tracing
+
+          sys.path.insert(0, "data_service_UC123")
+          from main import app
+          from fastapi.testclient import TestClient
+
+          mock_client = MagicMock()
+          mock_client.query.side_effect = Exception("BQ connection failed")
+
+          with patch("main.get_client", return_value=mock_client):
+              client = TestClient(app, raise_server_exceptions=False)
+              r = client.get("/accidents/temporal-analysis?city=Miami")
+              assert r.status_code == 500, f"Esperado 500, obtido {r.status_code}"
+              print("OK — /accidents/temporal-analysis erro BQ → 500")
+          EOF
+
+      # ── 7. LOGS EM CASO DE FALHA ─────────────────────────────────────────
+      - name: Logs do contentor (em caso de falha)
+        if: failure()
+        run: docker logs ${{ env.IMAGE }}
+
+      # ── 8. CLEANUP ───────────────────────────────────────────────────────
+      - name: Parar e remover contentor
+        if: always()
+        run: |
+          docker stop ${{ env.IMAGE }} || true
+          docker rm   ${{ env.IMAGE }} || true
