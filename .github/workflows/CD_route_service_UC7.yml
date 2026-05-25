@@ -35,6 +35,7 @@ jobs:
           docker run -d \
             --name ${{ env.IMAGE }} \
             -p ${{ env.PORT }}:${{ env.PORT }} \
+            -e API_TOKEN="" \
             -e PREDICTION_SERVICE_URL="http://localhost:8002" \
             -e OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4318/v1/traces" \
             ${{ env.IMAGE }}:${{ github.sha }}

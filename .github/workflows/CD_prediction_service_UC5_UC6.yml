@@ -27,7 +27,7 @@ jobs:
           docker build \
             -t ${{ env.IMAGE }}:${{ github.sha }} \
             -t ${{ env.IMAGE }}:latest \
-            ./prediction_service_UC5_UC6 
+            ./prediction_service_UC5_UC6
 
       # ── 3. ARRANCAR O CONTENTOR ──────────────────────────────────────────
       - name: Arrancar contentor
@@ -35,7 +35,7 @@ jobs:
           docker run -d \
             --name ${{ env.IMAGE }} \
             -p ${{ env.PORT }}:${{ env.PORT }} \
-            -e API_TOKEN="${{ secrets.BQ_API_TOKEN }}" \
+            -e API_TOKEN="" \
             -e DATA_SERVICE_URL="http://localhost:8001" \
             -e OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4318/v1/traces" \
             ${{ env.IMAGE }}:${{ github.sha }}
