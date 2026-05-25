@@ -1,0 +1,964 @@
+name: CD — Rota Maravilhosa
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Fluxo CD correto:
+#
+#   push → main
+#     │
+#     ├─ detect-changes        (quais serviços mudaram)
+#     │
+#     ├─ cloud-build           (gcloud builds submit → build + push para Artifact Registry)
+#     │
+#     ├─ deploy                (deploy-app.sh → kubectl apply de tudo no GKE)
+#     │
+#     ├─ verify-rollout        (kubectl rollout status de cada deployment)
+#     │
+#     ├─ smoke-tests           (port-forward para cada serviço no cluster → testar endpoints reais)
+#     │   ├─ smoke-api-gateway
+#     │   ├─ smoke-data-uc4
+#     │   ├─ smoke-data-uc123
+#     │   ├─ smoke-data-uc8-uc11
+#     │   ├─ smoke-prediction-uc5-uc6
+#     │   ├─ smoke-prediction-uc9-uc10
+#     │   └─ smoke-route-uc7
+#     │
+#     └─ rollback              (só corre se smoke-tests falharem → rollback.sh)
+#
+# Os smoke tests correm DEPOIS do deploy contra os pods reais no cluster GKE,
+# usando kubectl port-forward para expor cada serviço ao runner.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  PROJECT:   proj1cc-493515
+  REGION:    us-west4
+  CLUSTER:   rota-maravilhosa-cluster
+  NAMESPACE: rota-maravilhosa
+  REGISTRY:  us-west4-docker.pkg.dev/proj1cc-493515/rota-maravilhosa
+
+# ─────────────────────────────────────────────────────────────────────────────
+# JOB 1 — Detectar quais serviços mudaram
+# ─────────────────────────────────────────────────────────────────────────────
+jobs:
+  detect-changes:
+    name: Detectar alterações
+    runs-on: ubuntu-latest
+    outputs:
+      any_service:         ${{ steps.filter.outputs.any_service }}
+      api_gateway:         ${{ steps.filter.outputs.api_gateway }}
+      data_uc4:            ${{ steps.filter.outputs.data_uc4 }}
+      data_uc123:          ${{ steps.filter.outputs.data_uc123 }}
+      data_uc8_uc11:       ${{ steps.filter.outputs.data_uc8_uc11 }}
+      prediction_uc5_uc6:  ${{ steps.filter.outputs.prediction_uc5_uc6 }}
+      prediction_uc9_uc10: ${{ steps.filter.outputs.prediction_uc9_uc10 }}
+      route_uc7:           ${{ steps.filter.outputs.route_uc7 }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Filtrar paths alterados
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            api_gateway:
+              - 'api_gateway/**'
+            data_uc4:
+              - 'data_service_UC4/**'
+            data_uc123:
+              - 'data_service_UC123/**'
+            data_uc8_uc11:
+              - 'data_service_UC8_UC11/**'
+            prediction_uc5_uc6:
+              - 'prediction_service_UC5_UC6/**'
+            prediction_uc9_uc10:
+              - 'prediction_service_UC9_UC10/**'
+            route_uc7:
+              - 'route_service_UC7/**'
+            any_service:
+              - 'api_gateway/**'
+              - 'data_service_UC4/**'
+              - 'data_service_UC123/**'
+              - 'data_service_UC8_UC11/**'
+              - 'prediction_service_UC5_UC6/**'
+              - 'prediction_service_UC9_UC10/**'
+              - 'route_service_UC7/**'
+              - 'cloudbuild.yaml'
+              - 'deployment/**'
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # JOB 2 — Cloud Build: build + push de todas as imagens para o Artifact Registry
+  # Usa o cloudbuild.yaml já existente no repo (gcloud builds submit)
+  # ─────────────────────────────────────────────────────────────────────────────
+  cloud-build:
+    name: Cloud Build (build + push)
+    needs: detect-changes
+    if: needs.detect-changes.outputs.any_service == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Autenticar no GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Configurar gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT }}
+
+      # Submete o cloudbuild.yaml existente — constrói e faz push de todos os serviços
+      - name: Submeter ao Cloud Build
+        run: |
+          gcloud builds submit . \
+            --config=cloudbuild.yaml \
+            --project=${{ env.PROJECT }} \
+            --region=${{ env.REGION }} \
+            --timeout=1800s
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # JOB 3 — Deploy: executa deploy-app.sh no cluster GKE
+  # Aplica ConfigMaps, Secrets, Services, Deployments, HPA e Ingress
+  # ─────────────────────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy para GKE
+    needs: cloud-build
+    if: needs.cloud-build.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Autenticar no GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Configurar gcloud + kubectl
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT }}
+          install_components: kubectl
+
+      - name: Obter credenciais do cluster GKE
+        run: |
+          gcloud container clusters get-credentials ${{ env.CLUSTER }} \
+            --region ${{ env.REGION }} --project ${{ env.PROJECT }}
+
+      - name: Garantir namespace
+        run: |
+          kubectl apply -f deployment/kubernetes/namespace.yaml 2>/dev/null || \
+          kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+
+      # Secret BigQuery — vem do GitHub Secret (equivalente ao bq-key.json do build-and-deploy.sh)
+      - name: Criar/actualizar Secret BigQuery
+        run: |
+          echo '${{ secrets.BQ_SERVICE_ACCOUNT_KEY }}' > /tmp/bq-key.json
+          kubectl create secret generic bq-secret \
+            --namespace=${{ env.NAMESPACE }} \
+            --from-file=API_TOKEN=/tmp/bq-key.json \
+            --dry-run=client -o yaml | kubectl apply -f -
+          rm /tmp/bq-key.json
+
+      # Verificar modelos BQ — equivalente ao que deploy-app.sh faz no passo [3/9]
+      - name: Verificar modelos BigQuery
+        run: |
+          MODELS=$(bq ls --models ${{ env.PROJECT }}:accidents 2>/dev/null \
+            | grep -cE "severity_model|risk_model|occurrence_model" || echo "0")
+          echo "Modelos encontrados: $MODELS/4"
+          if [ "$MODELS" -lt 4 ]; then
+            echo "Modelos incompletos — a criar com create-models.sh..."
+            bash deployment/scripts/create-models.sh
+          else
+            echo "Todos os modelos existem — a saltar criação."
+          fi
+
+      # deploy-app.sh aplica networkpolicy, configmaps, services, deployments, HPA, ingress
+      - name: Executar deploy-app.sh
+        run: |
+          chmod +x deployment/scripts/deploy-app.sh
+          cd deployment/scripts && ./deploy-app.sh
+
+      # Aplicar circuit breakers Istio (circuit-breakers.sh)
+      - name: Aplicar Circuit Breakers Istio
+        run: |
+          chmod +x deployment/scripts/circuit-breakers.sh
+          cd deployment/scripts && ./circuit-breakers.sh || \
+            echo "Circuit breakers saltados (Istio pode não estar instalado)"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # JOB 4 — Verificar rollout: confirma que todos os pods ficaram Running
+  # ─────────────────────────────────────────────────────────────────────────────
+  verify-rollout:
+    name: Verificar rollout
+    needs: deploy
+    if: needs.deploy.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Autenticar no GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Configurar gcloud + kubectl
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT }}
+          install_components: kubectl
+
+      - name: Obter credenciais do cluster
+        run: |
+          gcloud container clusters get-credentials ${{ env.CLUSTER }} \
+            --region ${{ env.REGION }} --project ${{ env.PROJECT }}
+
+      - name: Estado do cluster — monitoring.sh
+        run: |
+          chmod +x deployment/scripts/monitoring.sh
+          bash deployment/scripts/monitoring.sh
+
+      - name: kubectl rollout status — todos os deployments
+        run: |
+          DEPLOYMENTS=(
+            api-gateway
+            data-service-uc4
+            data-service-uc123
+            data-service-uc8-uc11
+            prediction-service-uc5-uc6
+            prediction-service-uc9-uc10
+            route-service-uc7
+          )
+          FAILED=0
+          for d in "${DEPLOYMENTS[@]}"; do
+            echo "→ $d..."
+            if kubectl rollout status deployment/$d \
+                -n ${{ env.NAMESPACE }} --timeout=120s; then
+              echo "OK $d"
+            else
+              echo "FALHOU $d"
+              kubectl describe deployment/$d -n ${{ env.NAMESPACE }} | tail -20
+              FAILED=$((FAILED+1))
+            fi
+          done
+          [ $FAILED -eq 0 ] || { kubectl get pods -n ${{ env.NAMESPACE }}; exit 1; }
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # JOBS 5.x — Smoke Tests pós-deploy (em paralelo por serviço)
+  #
+  # Estratégia: kubectl port-forward expõe cada serviço ClusterIP ao runner.
+  # Os testes correm contra os pods REAIS no cluster, depois do deploy.
+  # Os endpoints que chamam BigQuery são testados com mock Python (sem credenciais).
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  smoke-api-gateway:
+    name: "Smoke pós-deploy: api-gateway (:8000)"
+    needs: [detect-changes, verify-rollout]
+    if: |
+      needs.verify-rollout.result == 'success' &&
+      needs.detect-changes.outputs.api_gateway == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT }}
+          install_components: kubectl
+      - name: Obter credenciais do cluster
+        run: |
+          gcloud container clusters get-credentials ${{ env.CLUSTER }} \
+            --region ${{ env.REGION }} --project ${{ env.PROJECT }}
+
+      - name: Port-forward api-gateway
+        run: |
+          kubectl port-forward svc/api-gateway 8000:8000 \
+            -n ${{ env.NAMESPACE }} &
+          sleep 4
+
+      - name: "GET /health → {status: ok}"
+        run: |
+          curl -sf http://localhost:8000/health | \
+            python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('status')=='ok', d"
+          echo "OK"
+
+      - name: "GET /ready → {status: ok}"
+        run: |
+          curl -sf http://localhost:8000/ready | \
+            python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('status')=='ok', d"
+          echo "OK"
+
+      - name: "GET /metrics → text/plain + requests_total"
+        run: |
+          R=$(curl -sf -D - http://localhost:8000/metrics)
+          echo "$R" | grep -i "text/plain"
+          echo "$R" | grep "requests_total"
+          echo "OK"
+
+  smoke-data-uc4:
+    name: "Smoke pós-deploy: data-service-uc4 (:8001)"
+    needs: [detect-changes, verify-rollout]
+    if: |
+      needs.verify-rollout.result == 'success' &&
+      needs.detect-changes.outputs.data_uc4 == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT }}
+          install_components: kubectl
+      - name: Obter credenciais do cluster
+        run: |
+          gcloud container clusters get-credentials ${{ env.CLUSTER }} \
+            --region ${{ env.REGION }} --project ${{ env.PROJECT }}
+
+      - name: Port-forward data-service-uc4
+        run: |
+          kubectl port-forward svc/data-service-uc4 8001:8001 \
+            -n ${{ env.NAMESPACE }} &
+          sleep 4
+
+      - name: "GET /health → {status: ok}"
+        run: |
+          curl -sf http://localhost:8001/health | \
+            python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('status')=='ok', d"
+          echo "OK"
+
+      - name: "GET /ready → {status: ok}"
+        run: |
+          curl -sf http://localhost:8001/ready | \
+            python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('status')=='ok', d"
+          echo "OK"
+
+      - name: "GET /metrics → text/plain + requests_total"
+        run: |
+          R=$(curl -sf -D - http://localhost:8001/metrics)
+          echo "$R" | grep -i "text/plain"
+          echo "$R" | grep "requests_total"
+          echo "OK"
+
+  smoke-data-uc123:
+    name: "Smoke pós-deploy: data-service-uc123 (:8004)"
+    needs: [detect-changes, verify-rollout]
+    if: |
+      needs.verify-rollout.result == 'success' &&
+      needs.detect-changes.outputs.data_uc123 == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT }}
+          install_components: kubectl
+      - name: Obter credenciais do cluster
+        run: |
+          gcloud container clusters get-credentials ${{ env.CLUSTER }} \
+            --region ${{ env.REGION }} --project ${{ env.PROJECT }}
+
+      - name: Port-forward data-service-uc123
+        run: |
+          kubectl port-forward svc/data-service-uc123 8004:8004 \
+            -n ${{ env.NAMESPACE }} &
+          sleep 4
+
+      - name: "GET /health → {status: ok}"
+        run: |
+          curl -sf http://localhost:8004/health | \
+            python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('status')=='ok', d"
+          echo "OK"
+
+      - name: "GET /ready → {status: ok}"
+        run: |
+          curl -sf http://localhost:8004/ready | \
+            python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('status')=='ok', d"
+          echo "OK"
+
+      - name: "GET /metrics → text/plain + requests_total"
+        run: |
+          R=$(curl -sf -D - http://localhost:8004/metrics)
+          echo "$R" | grep -i "text/plain"
+          echo "$R" | grep "requests_total"
+          echo "OK"
+
+  smoke-data-uc8-uc11:
+    name: "Smoke pós-deploy: data-service-uc8-uc11 (:8007)"
+    needs: [detect-changes, verify-rollout]
+    if: |
+      needs.verify-rollout.result == 'success' &&
+      needs.detect-changes.outputs.data_uc8_uc11 == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT }}
+          install_components: kubectl
+      - name: Obter credenciais do cluster
+        run: |
+          gcloud container clusters get-credentials ${{ env.CLUSTER }} \
+            --region ${{ env.REGION }} --project ${{ env.PROJECT }}
+
+      - name: Port-forward data-service-uc8-uc11
+        run: |
+          kubectl port-forward svc/data-service-uc8-uc11 8007:8007 \
+            -n ${{ env.NAMESPACE }} &
+          sleep 4
+
+      # ── Endpoints sem BQ (curl direto ao pod real) ───────────────────────
+      - name: "GET /health → {status: ok}"
+        run: |
+          curl -sf http://localhost:8007/health | \
+            python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('status')=='ok', d"
+          echo "OK"
+
+      - name: "GET /ready → {status: ok}"
+        run: |
+          curl -sf http://localhost:8007/ready | \
+            python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('status')=='ok', d"
+          echo "OK"
+
+      - name: "GET /metrics → text/plain + requests_total"
+        run: |
+          R=$(curl -sf -D - http://localhost:8007/metrics)
+          echo "$R" | grep -i "text/plain"
+          echo "$R" | grep "requests_total"
+          echo "OK"
+
+      # ── Endpoints com BQ: testados com mock (BQ real não acessível do runner) ─
+      - name: Instalar deps para testes BQ mockados
+        run: |
+          pip install fastapi httpx google-cloud-bigquery google-auth \
+            prometheus-client opentelemetry-api opentelemetry-sdk \
+            opentelemetry-exporter-otlp-proto-http \
+            opentelemetry-instrumentation-fastapi \
+            opentelemetry-instrumentation-httpx --quiet
+
+      - name: "GET /hotspots — lista com campos corretos"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import patch, MagicMock
+          tracing = MagicMock(); sys.modules["tracing"] = tracing
+          sys.path.insert(0, "data_service_UC8_UC11")
+          from main import app
+          from fastapi.testclient import TestClient
+          def row(**kw):
+              r = MagicMock(); r.__getitem__ = lambda s,k: kw[k]; r.keys = lambda: kw.keys(); return r
+          mc = MagicMock()
+          mc.query.return_value.result.return_value = [
+              row(Start_Lat=34.05, Start_Lng=-118.24, count=120),
+              row(Start_Lat=37.77, Start_Lng=-122.41, count=85),
+          ]
+          with patch("main.get_client", return_value=mc):
+              r = TestClient(app).get("/hotspots")
+              assert r.status_code == 200, f"Status {r.status_code}"
+              d = r.json()
+              assert isinstance(d, list) and len(d) == 2
+              assert "Start_Lat" in d[0] and "Start_Lng" in d[0] and "count" in d[0]
+              print("OK /hotspots")
+          EOF
+
+      - name: "GET /hotspots?city=Miami&state=FL&limit=5 — filtros na SQL"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import patch, MagicMock
+          tracing = MagicMock(); sys.modules["tracing"] = tracing
+          sys.path.insert(0, "data_service_UC8_UC11")
+          from main import app
+          from fastapi.testclient import TestClient
+          def row(**kw):
+              r = MagicMock(); r.__getitem__ = lambda s,k: kw[k]; r.keys = lambda: kw.keys(); return r
+          mc = MagicMock()
+          mc.query.return_value.result.return_value = [row(Start_Lat=25.77, Start_Lng=-80.19, count=42)]
+          with patch("main.get_client", return_value=mc):
+              r = TestClient(app).get("/hotspots?city=Miami&state=FL&limit=5")
+              assert r.status_code == 200
+              sql = mc.query.call_args[0][0]
+              assert "Miami" in sql and "FL" in sql and "5" in sql
+              print("OK /hotspots filtros")
+          EOF
+
+      - name: "GET /hotspots — BQ falha → 500"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import patch, MagicMock
+          tracing = MagicMock(); sys.modules["tracing"] = tracing
+          sys.path.insert(0, "data_service_UC8_UC11")
+          from main import app
+          from fastapi.testclient import TestClient
+          mc = MagicMock(); mc.query.side_effect = Exception("BQ down")
+          with patch("main.get_client", return_value=mc):
+              r = TestClient(app, raise_server_exceptions=False).get("/hotspots")
+              assert r.status_code == 500
+              print("OK /hotspots BQ falha → 500")
+          EOF
+
+      - name: "GET /county-comparison?state=CA — campos corretos"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import patch, MagicMock
+          tracing = MagicMock(); sys.modules["tracing"] = tracing
+          sys.path.insert(0, "data_service_UC8_UC11")
+          from main import app
+          from fastapi.testclient import TestClient
+          def row(**kw):
+              r = MagicMock(); r.__getitem__ = lambda s,k: kw[k]; r.keys = lambda: kw.keys(); return r
+          mc = MagicMock()
+          mc.query.return_value.result.return_value = [
+              row(County="Los Angeles", accident_count=5000, avg_severity=2.3),
+              row(County="San Diego",   accident_count=2100, avg_severity=1.9),
+          ]
+          with patch("main.get_client", return_value=mc):
+              r = TestClient(app).get("/county-comparison?state=CA")
+              assert r.status_code == 200
+              d = r.json()
+              assert "County" in d[0] and "accident_count" in d[0] and "avg_severity" in d[0]
+              sql = mc.query.call_args[0][0]
+              assert "CA" in sql
+              print("OK /county-comparison")
+          EOF
+
+      - name: "GET /county-comparison — sem state → 422"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import MagicMock
+          tracing = MagicMock(); sys.modules["tracing"] = tracing
+          sys.path.insert(0, "data_service_UC8_UC11")
+          from main import app
+          from fastapi.testclient import TestClient
+          r = TestClient(app).get("/county-comparison")
+          assert r.status_code == 422
+          print("OK /county-comparison sem state → 422")
+          EOF
+
+      - name: "GET /county-comparison — BQ falha → 500"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import patch, MagicMock
+          tracing = MagicMock(); sys.modules["tracing"] = tracing
+          sys.path.insert(0, "data_service_UC8_UC11")
+          from main import app
+          from fastapi.testclient import TestClient
+          mc = MagicMock(); mc.query.side_effect = Exception("BQ timeout")
+          with patch("main.get_client", return_value=mc):
+              r = TestClient(app, raise_server_exceptions=False).get("/county-comparison?state=CA")
+              assert r.status_code == 500
+              print("OK /county-comparison BQ falha → 500")
+          EOF
+
+  smoke-prediction-uc5-uc6:
+    name: "Smoke pós-deploy: prediction-service-uc5-uc6 (:8002)"
+    needs: [detect-changes, verify-rollout]
+    if: |
+      needs.verify-rollout.result == 'success' &&
+      needs.detect-changes.outputs.prediction_uc5_uc6 == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT }}
+          install_components: kubectl
+      - name: Obter credenciais do cluster
+        run: |
+          gcloud container clusters get-credentials ${{ env.CLUSTER }} \
+            --region ${{ env.REGION }} --project ${{ env.PROJECT }}
+
+      - name: Port-forward prediction-service-uc5-uc6
+        run: |
+          kubectl port-forward svc/prediction-service-uc5-uc6 8002:8002 \
+            -n ${{ env.NAMESPACE }} &
+          sleep 4
+
+      - name: "GET /health → {status: ok}"
+        run: |
+          curl -sf http://localhost:8002/health | \
+            python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('status')=='ok', d"
+          echo "OK"
+
+      - name: "GET /ready → {status: ok}"
+        run: |
+          curl -sf http://localhost:8002/ready | \
+            python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('status')=='ok', d"
+          echo "OK"
+
+      - name: "GET /metrics → text/plain + requests_total"
+        run: |
+          R=$(curl -sf -D - http://localhost:8002/metrics)
+          echo "$R" | grep -i "text/plain"
+          echo "$R" | grep "requests_total"
+          echo "OK"
+
+  smoke-prediction-uc9-uc10:
+    name: "Smoke pós-deploy: prediction-service-uc9-uc10 (:8008)"
+    needs: [detect-changes, verify-rollout]
+    if: |
+      needs.verify-rollout.result == 'success' &&
+      needs.detect-changes.outputs.prediction_uc9_uc10 == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT }}
+          install_components: kubectl
+      - name: Obter credenciais do cluster
+        run: |
+          gcloud container clusters get-credentials ${{ env.CLUSTER }} \
+            --region ${{ env.REGION }} --project ${{ env.PROJECT }}
+
+      - name: Port-forward prediction-service-uc9-uc10
+        run: |
+          kubectl port-forward svc/prediction-service-uc9-uc10 8008:8008 \
+            -n ${{ env.NAMESPACE }} &
+          sleep 4
+
+      # ── Endpoints sem BQ ─────────────────────────────────────────────────
+      - name: "GET /health → {status: ok}"
+        run: |
+          curl -sf http://localhost:8008/health | \
+            python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('status')=='ok', d"
+          echo "OK"
+
+      - name: "GET /ready → {status: ok}"
+        run: |
+          curl -sf http://localhost:8008/ready | \
+            python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('status')=='ok', d"
+          echo "OK"
+
+      - name: "GET /metrics → text/plain + requests_total"
+        run: |
+          R=$(curl -sf -D - http://localhost:8008/metrics)
+          echo "$R" | grep -i "text/plain"
+          echo "$R" | grep "requests_total"
+          echo "OK"
+
+      # ── Endpoints com BQ: mock ────────────────────────────────────────────
+      - name: Instalar deps para testes BQ mockados
+        run: |
+          pip install fastapi httpx google-cloud-bigquery google-auth \
+            prometheus-client opentelemetry-api opentelemetry-sdk \
+            opentelemetry-exporter-otlp-proto-http \
+            opentelemetry-instrumentation-fastapi \
+            opentelemetry-instrumentation-httpx --quiet
+
+      - name: "POST /accidents/predict-occurrence — prob + risk_level corretos"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import patch, MagicMock
+          tracing = MagicMock(); sys.modules["tracing"] = tracing
+          sys.path.insert(0, "prediction_service_UC9_UC10")
+          from main import app
+          from fastapi.testclient import TestClient
+          row = MagicMock(); row.__getitem__ = lambda s,k: 0.4 if k=="accident_probability" else None
+          mc = MagicMock(); mc.query.return_value.result.return_value = [row]
+          payload = {"latitude":34.05,"longitude":-118.24,"hour":8,"weather_condition":"Clear"}
+          with patch("main.get_client", return_value=mc):
+              r = TestClient(app).post("/accidents/predict-occurrence", json=payload)
+              assert r.status_code == 200, f"Status {r.status_code}: {r.text}"
+              d = r.json()
+              assert "accident_probability" in d and "risk_level" in d
+              assert d["risk_level"] in ("Low","Medium","High","Critical")
+              print(f"OK predict-occurrence: prob={d['accident_probability']} level={d['risk_level']}")
+          EOF
+
+      - name: "POST /accidents/predict-occurrence — hour=25 → 422"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import MagicMock
+          tracing = MagicMock(); sys.modules["tracing"] = tracing
+          sys.path.insert(0, "prediction_service_UC9_UC10")
+          from main import app
+          from fastapi.testclient import TestClient
+          r = TestClient(app).post("/accidents/predict-occurrence",
+              json={"latitude":34.05,"longitude":-118.24,"hour":25,"weather_condition":"Clear"})
+          assert r.status_code == 422
+          print("OK hour=25 → 422")
+          EOF
+
+      - name: "POST /accidents/predict-occurrence — body vazio → 422"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import MagicMock
+          tracing = MagicMock(); sys.modules["tracing"] = tracing
+          sys.path.insert(0, "prediction_service_UC9_UC10")
+          from main import app
+          from fastapi.testclient import TestClient
+          r = TestClient(app).post("/accidents/predict-occurrence", json={})
+          assert r.status_code == 422
+          print("OK body vazio → 422")
+          EOF
+
+      - name: "POST /accidents/predict-occurrence — BQ falha → 500"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import patch, MagicMock
+          tracing = MagicMock(); sys.modules["tracing"] = tracing
+          sys.path.insert(0, "prediction_service_UC9_UC10")
+          from main import app
+          from fastapi.testclient import TestClient
+          mc = MagicMock(); mc.query.side_effect = Exception("BQ down")
+          with patch("main.get_client", return_value=mc):
+              r = TestClient(app, raise_server_exceptions=False).post(
+                  "/accidents/predict-occurrence",
+                  json={"latitude":34.05,"longitude":-118.24,"hour":8,"weather_condition":"Rain"})
+              assert r.status_code == 500
+              print("OK BQ falha → 500")
+          EOF
+
+      - name: "POST /accidents/simulate-risk — junction → fator 1.3 aplicado"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import patch, MagicMock
+          tracing = MagicMock(); sys.modules["tracing"] = tracing
+          sys.path.insert(0, "prediction_service_UC9_UC10")
+          from main import app
+          from fastapi.testclient import TestClient
+          row = MagicMock(); row.__getitem__ = lambda s,k: 0.4 if k=="accident_probability" else None
+          mc = MagicMock(); mc.query.return_value.result.return_value = [row]
+          payload = {"latitude":34.05,"longitude":-118.24,"hour":8,"weather_condition":"Clear","road_topology":"junction"}
+          with patch("main.get_client", return_value=mc):
+              r = TestClient(app).post("/accidents/simulate-risk", json=payload)
+              assert r.status_code == 200, f"Status {r.status_code}: {r.text}"
+              d = r.json()
+              assert "probability_score" in d and "predicted_severity" in d and "explanation" in d
+              assert d["probability_score"] > 0.4, f"Esperado >0.4 (junction ×1.3), obtido {d['probability_score']}"
+              assert isinstance(d["explanation"], list)
+              print(f"OK simulate-risk junction: score={d['probability_score']}")
+          EOF
+
+      - name: "POST /accidents/simulate-risk — todos os road_topology → 200"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import patch, MagicMock
+          tracing = MagicMock(); sys.modules["tracing"] = tracing
+          sys.path.insert(0, "prediction_service_UC9_UC10")
+          from main import app
+          from fastapi.testclient import TestClient
+          row = MagicMock(); row.__getitem__ = lambda s,k: 0.3 if k=="accident_probability" else None
+          mc = MagicMock(); mc.query.return_value.result.return_value = [row]
+          topologies = ["junction","roundabout","curve","traffic_signal","straight","unknown_topology"]
+          with patch("main.get_client", return_value=mc):
+              client = TestClient(app)
+              for topo in topologies:
+                  r = client.post("/accidents/simulate-risk",
+                      json={"latitude":34.05,"longitude":-118.24,"hour":10,
+                            "weather_condition":"Clear","road_topology":topo})
+                  assert r.status_code == 200, f"{topo}: status {r.status_code}"
+                  print(f"OK simulate-risk {topo}: {r.json()['probability_score']}")
+          EOF
+
+      - name: "POST /accidents/simulate-risk — sem road_topology → 422"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import MagicMock
+          tracing = MagicMock(); sys.modules["tracing"] = tracing
+          sys.path.insert(0, "prediction_service_UC9_UC10")
+          from main import app
+          from fastapi.testclient import TestClient
+          r = TestClient(app).post("/accidents/simulate-risk",
+              json={"latitude":34.05,"longitude":-118.24,"hour":8,"weather_condition":"Clear"})
+          assert r.status_code == 422
+          print("OK sem road_topology → 422")
+          EOF
+
+      - name: "POST /accidents/simulate-risk — BQ falha → 500"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import patch, MagicMock
+          tracing = MagicMock(); sys.modules["tracing"] = tracing
+          sys.path.insert(0, "prediction_service_UC9_UC10")
+          from main import app
+          from fastapi.testclient import TestClient
+          mc = MagicMock(); mc.query.side_effect = Exception("BQ down")
+          with patch("main.get_client", return_value=mc):
+              r = TestClient(app, raise_server_exceptions=False).post(
+                  "/accidents/simulate-risk",
+                  json={"latitude":34.05,"longitude":-118.24,"hour":8,
+                        "weather_condition":"Clear","road_topology":"junction"})
+              assert r.status_code == 500
+              print("OK BQ falha → 500")
+          EOF
+
+  smoke-route-uc7:
+    name: "Smoke pós-deploy: route-service-uc7 (:8003)"
+    needs: [detect-changes, verify-rollout]
+    if: |
+      needs.verify-rollout.result == 'success' &&
+      needs.detect-changes.outputs.route_uc7 == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT }}
+          install_components: kubectl
+      - name: Obter credenciais do cluster
+        run: |
+          gcloud container clusters get-credentials ${{ env.CLUSTER }} \
+            --region ${{ env.REGION }} --project ${{ env.PROJECT }}
+
+      - name: Port-forward route-service-uc7
+        run: |
+          kubectl port-forward svc/route-service-uc7 8003:8003 \
+            -n ${{ env.NAMESPACE }} &
+          sleep 4
+
+      - name: "GET /health → {status: ok}"
+        run: |
+          curl -sf http://localhost:8003/health | \
+            python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('status')=='ok', d"
+          echo "OK"
+
+      - name: "GET /ready → {status: ok}"
+        run: |
+          curl -sf http://localhost:8003/ready | \
+            python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('status')=='ok', d"
+          echo "OK"
+
+      - name: "GET /metrics → text/plain + requests_total"
+        run: |
+          R=$(curl -sf -D - http://localhost:8003/metrics)
+          echo "$R" | grep -i "text/plain"
+          echo "$R" | grep "requests_total"
+          echo "OK"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # JOB 6 — Rollback automático se qualquer smoke test falhar
+  # Usa kubectl rollout undo (equivalente ao rollback.sh sem o prompt interactivo)
+  # ─────────────────────────────────────────────────────────────────────────────
+  rollback:
+    name: Rollback automático
+    needs:
+      - deploy
+      - smoke-api-gateway
+      - smoke-data-uc4
+      - smoke-data-uc123
+      - smoke-data-uc8-uc11
+      - smoke-prediction-uc5-uc6
+      - smoke-prediction-uc9-uc10
+      - smoke-route-uc7
+    if: |
+      always() &&
+      needs.deploy.result == 'success' &&
+      (
+        needs.smoke-api-gateway.result         == 'failure' ||
+        needs.smoke-data-uc4.result            == 'failure' ||
+        needs.smoke-data-uc123.result          == 'failure' ||
+        needs.smoke-data-uc8-uc11.result       == 'failure' ||
+        needs.smoke-prediction-uc5-uc6.result  == 'failure' ||
+        needs.smoke-prediction-uc9-uc10.result == 'failure' ||
+        needs.smoke-route-uc7.result           == 'failure'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Autenticar no GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Configurar gcloud + kubectl
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT }}
+          install_components: kubectl
+
+      - name: Obter credenciais do cluster
+        run: |
+          gcloud container clusters get-credentials ${{ env.CLUSTER }} \
+            --region ${{ env.REGION }} --project ${{ env.PROJECT }}
+
+      # rollback.sh original tem prompt interactivo — replicamos o kubectl rollout undo
+      - name: Rollback — kubectl rollout undo (equivalente a rollback.sh)
+        run: |
+          DEPLOYMENTS=(
+            api-gateway
+            data-service-uc4
+            data-service-uc123
+            data-service-uc8-uc11
+            prediction-service-uc5-uc6
+            prediction-service-uc9-uc10
+            route-service-uc7
+          )
+          for d in "${DEPLOYMENTS[@]}"; do
+            echo "→ Rollback: $d"
+            kubectl rollout undo deployment/$d -n ${{ env.NAMESPACE }} 2>/dev/null || \
+              echo "  $d: sem revisão anterior ou deployment não existe"
+          done
+
+      - name: Aguardar rollback — api-gateway
+        run: |
+          kubectl rollout status deployment/api-gateway \
+            -n ${{ env.NAMESPACE }} --timeout=120s || true
+
+      - name: Estado após rollback — monitoring.sh
+        run: |
+          chmod +x deployment/scripts/monitoring.sh
+          bash deployment/scripts/monitoring.sh
+
+      - name: Marcar pipeline como falhado
+        run: |
+          echo "Rollback executado — smoke tests falharam após deploy."
+          exit 1
