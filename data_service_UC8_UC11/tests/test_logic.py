@@ -40,6 +40,13 @@ def test_build_hotspots_query_with_state2():
     assert "LIMIT 10" in query
 
 
+def test_build_hotspots_query_with_state3():
+    query = build_hotspots_query(city=None, state="AL", limit=10)
+
+    assert "State = 'AL'" in query
+    assert "LIMIT 10" in query
+
+
 def test_build_hotspots_query_with_city_and_state():
     query = build_hotspots_query(city="Miami", state="FL", limit=20)
 
