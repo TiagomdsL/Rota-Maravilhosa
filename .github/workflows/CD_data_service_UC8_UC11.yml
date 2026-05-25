@@ -1,0 +1,315 @@
+name: CD — data-service-uc8-uc11
+
+# Corre apenas em push para main e só quando há alterações neste serviço
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "data_service_UC8_UC11/**"
+
+env:
+  IMAGE: data-service-uc8-uc11
+  PORT: 8007
+
+jobs:
+  build-and-smoke-test:
+    name: Build + Smoke Test endpoints
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. CHECKOUT ──────────────────────────────────────────────────────
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      # ── 2. BUILD DA IMAGEM ───────────────────────────────────────────────
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t ${{ env.IMAGE }}:${{ github.sha }} \
+            -t ${{ env.IMAGE }}:latest \
+            ./data_service_UC8_UC11
+
+      # ── 3. ARRANCAR O CONTENTOR ──────────────────────────────────────────
+      # API_TOKEN vazio → o serviço usa ADC; como os endpoints de health/ready/metrics
+      # não chamam BigQuery, o contentor fica saudável sem credenciais reais.
+      # Os endpoints que chamam BQ (hotspots, county-comparison) são testados
+      # com um mock externo via variável de ambiente (ver passo 6).
+      - name: Arrancar contentor
+        run: |
+          docker run -d \
+            --name ${{ env.IMAGE }} \
+            -p ${{ env.PORT }}:${{ env.PORT }} \
+            -e API_TOKEN="" \
+            -e OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4318/v1/traces" \
+            ${{ env.IMAGE }}:${{ github.sha }}
+
+      # ── 4. AGUARDAR O SERVIÇO ESTAR PRONTO ──────────────────────────────
+      - name: Aguardar serviço iniciar
+        run: |
+          echo "A aguardar que o serviço responda em :${{ env.PORT }}..."
+          for i in $(seq 1 20); do
+            if curl -sf http://localhost:${{ env.PORT }}/health > /dev/null; then
+              echo "Serviço disponível após ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Timeout: serviço não respondeu"
+          docker logs ${{ env.IMAGE }}
+          exit 1
+
+      # ── 5. SMOKE TESTS — ENDPOINTS SEM BQ ───────────────────────────────
+
+      - name: "GET /health → 200 + {status: ok}"
+        run: |
+          BODY=$(curl -sf http://localhost:${{ env.PORT }}/health)
+          echo "Response: $BODY"
+          echo "$BODY" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          assert d.get('status') == 'ok', f'Esperado ok, obtido: {d}'
+          print('OK')
+          "
+
+      - name: "GET /ready → 200 + {status: ok}"
+        run: |
+          BODY=$(curl -sf http://localhost:${{ env.PORT }}/ready)
+          echo "Response: $BODY"
+          echo "$BODY" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          assert d.get('status') == 'ok', f'Esperado ok, obtido: {d}'
+          print('OK')
+          "
+
+      - name: "GET /metrics → 200 + content-type text/plain + counters presentes"
+        run: |
+          RESPONSE=$(curl -sf -D - http://localhost:${{ env.PORT }}/metrics)
+          echo "$RESPONSE" | grep -i "text/plain" || \
+            { echo "FALHOU: content-type errado"; exit 1; }
+          echo "$RESPONSE" | grep "requests_total" || \
+            { echo "FALHOU: metric requests_total ausente"; exit 1; }
+          echo "$RESPONSE" | grep "request_latency_seconds" || \
+            { echo "FALHOU: metric request_latency_seconds ausente"; exit 1; }
+          echo "OK"
+
+      # ── 6. SMOKE TESTS — ENDPOINTS COM BQ (mock via patch) ───────────────
+      # Usamos um script Python ad-hoc que arranca o app com o BQ mockado
+      # e faz pedidos HTTP reais contra ele — sem precisar de credenciais GCP.
+
+      - name: Instalar dependências para smoke tests BQ
+        run: |
+          pip install fastapi httpx pytest pytest-asyncio \
+            google-cloud-bigquery google-auth \
+            prometheus-client \
+            opentelemetry-api opentelemetry-sdk \
+            opentelemetry-exporter-otlp-proto-http \
+            opentelemetry-instrumentation-fastapi \
+            opentelemetry-instrumentation-httpx \
+            --quiet
+
+      - name: "GET /hotspots — sem filtros → 200 + lista"
+        run: |
+          python3 - <<'EOF'
+          import sys, os, json
+          from unittest.mock import patch, MagicMock
+
+          # Stub tracing
+          tracing = MagicMock()
+          tracing.setup_tracing = MagicMock()
+          tracing.get_current_span = MagicMock(return_value=MagicMock())
+          sys.modules["tracing"] = tracing
+
+          sys.path.insert(0, "data_service_UC8_UC11")
+          from main import app
+          from fastapi.testclient import TestClient
+
+          def make_row(**kw):
+              r = MagicMock()
+              r.__getitem__ = lambda s, k: kw[k]
+              r.keys = lambda: kw.keys()
+              return r
+
+          rows = [
+              make_row(Start_Lat=34.05, Start_Lng=-118.24, count=120),
+              make_row(Start_Lat=37.77, Start_Lng=-122.41, count=85),
+          ]
+          mock_client = MagicMock()
+          mock_client.query.return_value.result.return_value = rows
+
+          with patch("main.get_client", return_value=mock_client):
+              client = TestClient(app)
+              r = client.get("/hotspots")
+              assert r.status_code == 200, f"Status: {r.status_code}"
+              data = r.json()
+              assert isinstance(data, list), "Esperava lista"
+              assert len(data) == 2
+              assert "Start_Lat" in data[0]
+              assert "Start_Lng" in data[0]
+              assert "count" in data[0]
+              print("OK — /hotspots sem filtros")
+          EOF
+
+      - name: "GET /hotspots?city=Miami&state=FL → 200 + WHERE na query"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import patch, MagicMock
+
+          tracing = MagicMock()
+          tracing.setup_tracing = MagicMock()
+          tracing.get_current_span = MagicMock(return_value=MagicMock())
+          sys.modules["tracing"] = tracing
+
+          sys.path.insert(0, "data_service_UC8_UC11")
+          from main import app
+          from fastapi.testclient import TestClient
+
+          def make_row(**kw):
+              r = MagicMock()
+              r.__getitem__ = lambda s, k: kw[k]
+              r.keys = lambda: kw.keys()
+              return r
+
+          mock_client = MagicMock()
+          mock_client.query.return_value.result.return_value = [
+              make_row(Start_Lat=25.77, Start_Lng=-80.19, count=42)
+          ]
+
+          with patch("main.get_client", return_value=mock_client):
+              client = TestClient(app)
+              r = client.get("/hotspots?city=Miami&state=FL&limit=5")
+              assert r.status_code == 200, f"Status: {r.status_code}"
+              sql = mock_client.query.call_args[0][0]
+              assert "Miami" in sql, "city não está na query"
+              assert "FL" in sql, "state não está na query"
+              assert "5" in sql, "limit não está na query"
+              print("OK — /hotspots com filtros city+state+limit")
+          EOF
+
+      - name: "GET /hotspots — BQ falha → 500"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import patch, MagicMock
+
+          tracing = MagicMock()
+          tracing.setup_tracing = MagicMock()
+          tracing.get_current_span = MagicMock(return_value=MagicMock())
+          sys.modules["tracing"] = tracing
+
+          sys.path.insert(0, "data_service_UC8_UC11")
+          from main import app
+          from fastapi.testclient import TestClient
+
+          mock_client = MagicMock()
+          mock_client.query.side_effect = Exception("BQ connection failed")
+
+          with patch("main.get_client", return_value=mock_client):
+              client = TestClient(app, raise_server_exceptions=False)
+              r = client.get("/hotspots")
+              assert r.status_code == 500, f"Esperado 500, obtido {r.status_code}"
+              print("OK — /hotspots erro BQ → 500")
+          EOF
+
+      - name: "GET /county-comparison?state=CA → 200 + campos correctos"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import patch, MagicMock
+
+          tracing = MagicMock()
+          tracing.setup_tracing = MagicMock()
+          tracing.get_current_span = MagicMock(return_value=MagicMock())
+          sys.modules["tracing"] = tracing
+
+          sys.path.insert(0, "data_service_UC8_UC11")
+          from main import app
+          from fastapi.testclient import TestClient
+
+          def make_row(**kw):
+              r = MagicMock()
+              r.__getitem__ = lambda s, k: kw[k]
+              r.keys = lambda: kw.keys()
+              return r
+
+          rows = [
+              make_row(County="Los Angeles", accident_count=5000, avg_severity=2.3),
+              make_row(County="San Diego",   accident_count=2100, avg_severity=1.9),
+          ]
+          mock_client = MagicMock()
+          mock_client.query.return_value.result.return_value = rows
+
+          with patch("main.get_client", return_value=mock_client):
+              client = TestClient(app)
+              r = client.get("/county-comparison?state=CA")
+              assert r.status_code == 200, f"Status: {r.status_code}"
+              data = r.json()
+              assert isinstance(data, list)
+              assert len(data) == 2
+              assert "County" in data[0]
+              assert "accident_count" in data[0]
+              assert "avg_severity" in data[0]
+              sql = mock_client.query.call_args[0][0]
+              assert "CA" in sql
+              print("OK — /county-comparison?state=CA")
+          EOF
+
+      - name: "GET /county-comparison — state em falta → 422"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import MagicMock
+
+          tracing = MagicMock()
+          tracing.setup_tracing = MagicMock()
+          tracing.get_current_span = MagicMock(return_value=MagicMock())
+          sys.modules["tracing"] = tracing
+
+          sys.path.insert(0, "data_service_UC8_UC11")
+          from main import app
+          from fastapi.testclient import TestClient
+
+          client = TestClient(app)
+          r = client.get("/county-comparison")
+          assert r.status_code == 422, f"Esperado 422, obtido {r.status_code}"
+          print("OK — /county-comparison sem state → 422")
+          EOF
+
+      - name: "GET /county-comparison — BQ falha → 500"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import patch, MagicMock
+
+          tracing = MagicMock()
+          tracing.setup_tracing = MagicMock()
+          tracing.get_current_span = MagicMock(return_value=MagicMock())
+          sys.modules["tracing"] = tracing
+
+          sys.path.insert(0, "data_service_UC8_UC11")
+          from main import app
+          from fastapi.testclient import TestClient
+
+          mock_client = MagicMock()
+          mock_client.query.side_effect = Exception("BQ timeout")
+
+          with patch("main.get_client", return_value=mock_client):
+              client = TestClient(app, raise_server_exceptions=False)
+              r = client.get("/county-comparison?state=CA")
+              assert r.status_code == 500, f"Esperado 500, obtido {r.status_code}"
+              print("OK — /county-comparison erro BQ → 500")
+          EOF
+
+      # ── 7. LOGS EM CASO DE FALHA ─────────────────────────────────────────
+      - name: Logs do contentor (em caso de falha)
+        if: failure()
+        run: docker logs ${{ env.IMAGE }}
+
+      # ── 8. CLEANUP ───────────────────────────────────────────────────────
+      - name: Parar e remover contentor
+        if: always()
+        run: |
+          docker stop ${{ env.IMAGE }} || true
+          docker rm   ${{ env.IMAGE }} || true

@@ -6,11 +6,9 @@ name: CI - route_service_UC7
 
 on:
   push:
-    branches: [ main ]
     paths:
       - 'route_service_UC7/**'
   pull_request:
-    branches: [ main ]
     paths:
       - 'route_service_UC7/**'
 

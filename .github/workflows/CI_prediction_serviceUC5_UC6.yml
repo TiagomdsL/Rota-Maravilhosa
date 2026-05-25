@@ -6,11 +6,9 @@ name: CI - prediction_service_UC5_UC6
 
 on:
   push:
-    branches: [ main ]
     paths:
       - 'prediction_service_UC5_UC6/**'
   pull_request:
-    branches: [ main ]
     paths:
       - 'prediction_service_UC5_UC6/**'
 
