@@ -285,3 +285,6 @@ def test_normalize_state_invalid_parametrized(invalid_state):
     # Não usar match específico porque a mensagem pode variar
     with pytest.raises(ValueError):
         normalize_state(invalid_state)
+
+
+# test

@@ -133,7 +133,7 @@ jobs:
                   "origin_lon": -118.24,
                   "destination_lat": 34.10,
                   "destination_lon": -118.20,
-                  "timestamp": "2024-01-15T08:00:00"
+                  "timestamp": "2022-01-15T08:00:00"
               })
               assert r.status_code == 200, f"Status: {r.status_code} — {r.text}"
               data = r.json()
