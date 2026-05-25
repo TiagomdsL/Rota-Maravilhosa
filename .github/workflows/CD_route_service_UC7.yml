@@ -1,0 +1,259 @@
+name: CD — route-service-uc7
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "route_service_UC7/**"
+
+env:
+  IMAGE: route-service-uc7
+  PORT: 8003
+
+jobs:
+  build-and-smoke-test:
+    name: Build + Smoke Test endpoints
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. CHECKOUT ──────────────────────────────────────────────────────
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      # ── 2. BUILD DA IMAGEM ───────────────────────────────────────────────
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t ${{ env.IMAGE }}:${{ github.sha }} \
+            -t ${{ env.IMAGE }}:latest \
+            -f route_service_UC7/Dockerfile \
+            .
+
+      # ── 3. ARRANCAR O CONTENTOR ──────────────────────────────────────────
+      - name: Arrancar contentor
+        run: |
+          docker run -d \
+            --name ${{ env.IMAGE }} \
+            -p ${{ env.PORT }}:${{ env.PORT }} \
+            -e PREDICTION_SERVICE_URL="http://localhost:8002" \
+            -e OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4318/v1/traces" \
+            ${{ env.IMAGE }}:${{ github.sha }}
+
+      # ── 4. AGUARDAR O SERVIÇO ESTAR PRONTO ──────────────────────────────
+      - name: Aguardar serviço iniciar
+        run: |
+          for i in $(seq 1 20); do
+            if curl -sf http://localhost:${{ env.PORT }}/health > /dev/null; then
+              echo "Serviço disponível após ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Timeout: serviço não respondeu"
+          docker logs ${{ env.IMAGE }}
+          exit 1
+
+      # ── 5. SMOKE TESTS — ENDPOINTS ───────────────────────────────────────
+
+      - name: "GET /health → 200 + {status: ok}"
+        run: |
+          BODY=$(curl -sf http://localhost:${{ env.PORT }}/health)
+          echo "Response: $BODY"
+          echo "$BODY" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          assert d.get('status') == 'ok', f'Esperado ok, obtido: {d}'
+          print('OK')
+          "
+
+      - name: "GET /ready → 200 + {status: ok}"
+        run: |
+          BODY=$(curl -sf http://localhost:${{ env.PORT }}/ready)
+          echo "Response: $BODY"
+          echo "$BODY" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          assert d.get('status') == 'ok', f'Esperado ok, obtido: {d}'
+          print('OK')
+          "
+
+      - name: "GET /metrics → 200 + text/plain + counters presentes"
+        run: |
+          RESPONSE=$(curl -sf -D - http://localhost:${{ env.PORT }}/metrics)
+          echo "$RESPONSE" | grep -i "text/plain" || \
+            { echo "FALHOU: content-type errado"; exit 1; }
+          echo "$RESPONSE" | grep "requests_total" || \
+            { echo "FALHOU: metric requests_total ausente"; exit 1; }
+          echo "$RESPONSE" | grep "request_latency_seconds" || \
+            { echo "FALHOU: metric request_latency_seconds ausente"; exit 1; }
+          echo "OK"
+
+      # ── 6. SMOKE TESTS — ENDPOINTS COM MOCK DO PREDICTION SERVICE ─────────
+
+      - name: Instalar dependências para smoke tests
+        run: |
+          pip install fastapi httpx pytest \
+            prometheus-client \
+            opentelemetry-api opentelemetry-sdk \
+            opentelemetry-exporter-otlp-proto-http \
+            opentelemetry-instrumentation-fastapi \
+            opentelemetry-instrumentation-httpx \
+            --quiet
+
+      - name: "POST /route/analyze — caso normal → 200"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import patch, AsyncMock, MagicMock
+
+          tracing = MagicMock()
+          tracing.setup_tracing = MagicMock()
+          tracing.get_current_span = MagicMock(return_value=MagicMock())
+          sys.modules["tracing"] = tracing
+
+          sys.path.insert(0, "route_service_UC7")
+          from main import app
+          from fastapi.testclient import TestClient
+
+          mock_response = MagicMock()
+          mock_response.json.return_value = {
+              "accident_probability": 0.35,
+              "predicted_severity": 2,
+              "nearby_accidents_count": 3
+          }
+          mock_response.raise_for_status = MagicMock()
+
+          mock_client = AsyncMock()
+          mock_client.post.return_value = mock_response
+
+          with patch("httpx.AsyncClient", return_value=mock_client):
+              client = TestClient(app)
+              r = client.post("/route/analyze", json={
+                  "origin_lat": 34.05,
+                  "origin_lon": -118.24,
+                  "destination_lat": 34.10,
+                  "destination_lon": -118.20,
+                  "timestamp": "2024-01-15T08:00:00"
+              })
+              assert r.status_code == 200, f"Status: {r.status_code} — {r.text}"
+              data = r.json()
+              assert "risk_score" in data
+              assert "risk_level" in data
+              assert "recommended_route" in data
+              assert "total_waypoints_analyzed" in data
+              print(f"OK — /route/analyze: risk_score={data['risk_score']}, level={data['risk_level']}")
+          EOF
+
+      - name: "POST /route/analyze — campos em falta → 422"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import MagicMock
+
+          tracing = MagicMock()
+          tracing.setup_tracing = MagicMock()
+          tracing.get_current_span = MagicMock(return_value=MagicMock())
+          sys.modules["tracing"] = tracing
+
+          sys.path.insert(0, "route_service_UC7")
+          from main import app
+          from fastapi.testclient import TestClient
+
+          r = TestClient(app).post("/route/analyze", json={"origin_lat": 34.05})
+          assert r.status_code == 422, f"Esperado 422, obtido {r.status_code}"
+          print("OK — campos em falta → 422")
+          EOF
+
+      - name: "POST /route/analyze — prediction service falha → 200 com fallback"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import patch, AsyncMock, MagicMock
+
+          tracing = MagicMock()
+          tracing.setup_tracing = MagicMock()
+          tracing.get_current_span = MagicMock(return_value=MagicMock())
+          sys.modules["tracing"] = tracing
+
+          sys.path.insert(0, "route_service_UC7")
+          from main import app
+          from fastapi.testclient import TestClient
+
+          mock_client = AsyncMock()
+          mock_client.post.side_effect = Exception("Prediction service unavailable")
+
+          with patch("httpx.AsyncClient", return_value=mock_client):
+              client = TestClient(app)
+              r = client.post("/route/analyze", json={
+                  "origin_lat": 34.05,
+                  "origin_lon": -118.24,
+                  "destination_lat": 34.10,
+                  "destination_lon": -118.20
+              })
+              assert r.status_code == 200, f"Esperado 200, obtido {r.status_code}"
+              data = r.json()
+              assert data["risk_score"] == 0.0
+              print("OK — prediction service falha → fallback para 0.0")
+          EOF
+
+      - name: "POST /route/analyze — valida cálculo de interpolação"
+        run: |
+          python3 - <<'EOF'
+          import sys
+          from unittest.mock import patch, AsyncMock, MagicMock
+
+          tracing = MagicMock()
+          tracing.setup_tracing = MagicMock()
+          tracing.get_current_span = MagicMock(return_value=MagicMock())
+          sys.modules["tracing"] = tracing
+
+          sys.path.insert(0, "route_service_UC7")
+          from main import app
+          from fastapi.testclient import TestClient
+
+          call_count = 0
+          captured_coords = []
+
+          async def mock_post(*args, **kwargs):
+              nonlocal call_count, captured_coords
+              call_count += 1
+              data = kwargs["json"]
+              captured_coords.append((data["latitude"], data["longitude"]))
+              mock_resp = MagicMock()
+              mock_resp.json.return_value = {
+                  "accident_probability": 0.5,
+                  "predicted_severity": 2,
+                  "nearby_accidents_count": 1
+              }
+              mock_resp.raise_for_status = MagicMock()
+              return mock_resp
+
+          mock_client = AsyncMock()
+          mock_client.post.side_effect = mock_post
+
+          with patch("httpx.AsyncClient", return_value=mock_client):
+              client = TestClient(app)
+              r = client.post("/route/analyze", json={
+                  "origin_lat": 0.0,
+                  "origin_lon": 0.0,
+                  "destination_lat": 10.0,
+                  "destination_lon": 10.0
+              })
+              assert r.status_code == 200
+              # Deveria ter 7 pontos (5 waypoints + origem + destino) = 7 chamadas
+              assert call_count == 7, f"Esperado 7 chamadas, obtido {call_count}"
+              print(f"OK — interpolação gerou {call_count} pontos")
+          EOF
+
+      # ── 7. LOGS EM CASO DE FALHA ─────────────────────────────────────────
+      - name: Logs do contentor (em caso de falha)
+        if: failure()
+        run: docker logs ${{ env.IMAGE }}
+
+      # ── 8. CLEANUP ───────────────────────────────────────────────────────
+      - name: Parar e remover contentor
+        if: always()
+        run: |
+          docker stop ${{ env.IMAGE }} || true
+          docker rm   ${{ env.IMAGE }} || true
