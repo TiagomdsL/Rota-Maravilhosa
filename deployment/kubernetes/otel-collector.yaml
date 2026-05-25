@@ -25,7 +25,7 @@ data:
       debug:
         verbosity: detailed
       otlphttp/jaeger:
-        endpoint: http://jaeger-traces-collector.observability:4318
+        endpoint: http://jaeger.observability:4318
         tls:
           insecure: true
     
