@@ -10,7 +10,7 @@ on:
 
 env:
   IMAGE: data-service-uc123
-  PORT: 8008
+  PORT: 8004
 
 jobs:
   build-and-smoke-test:
