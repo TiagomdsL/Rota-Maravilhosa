@@ -97,3 +97,6 @@ def test_nearby_accidents_query2():
     assert "38.51" in query
     assert "-9.11" in query
     assert "-9.09" in query
+
+
+# test

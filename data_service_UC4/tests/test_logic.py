@@ -125,6 +125,3 @@ def test_bounding_box_query_limit():
     )
 
     assert "LIMIT 999" in query
-
-
-# test

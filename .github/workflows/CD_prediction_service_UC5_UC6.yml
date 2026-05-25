@@ -27,8 +27,7 @@ jobs:
           docker build \
             -t ${{ env.IMAGE }}:${{ github.sha }} \
             -t ${{ env.IMAGE }}:latest \
-            -f prediction_service_UC5_UC6/Dockerfile \
-            .
+            ./prediction_service_UC5_UC6 
 
       # ── 3. ARRANCAR O CONTENTOR ──────────────────────────────────────────
       - name: Arrancar contentor

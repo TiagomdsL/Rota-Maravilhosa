@@ -27,8 +27,7 @@ jobs:
           docker build \
             -t ${{ env.IMAGE }}:${{ github.sha }} \
             -t ${{ env.IMAGE }}:latest \
-            -f route_service_UC7/Dockerfile \
-            .
+            ./route_service_UC7 
 
       # ── 3. ARRANCAR O CONTENTOR ──────────────────────────────────────────
       - name: Arrancar contentor

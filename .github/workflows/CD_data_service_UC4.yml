@@ -27,8 +27,7 @@ jobs:
           docker build \
             -t ${{ env.IMAGE }}:${{ github.sha }} \
             -t ${{ env.IMAGE }}:latest \
-            -f data_service_UC4/Dockerfile \
-            .
+            ./data_service_UC4
 
       # ── 3. ARRANCAR O CONTENTOR ──────────────────────────────────────────
       - name: Arrancar contentor
