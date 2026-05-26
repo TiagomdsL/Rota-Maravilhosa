@@ -49,8 +49,8 @@ def test_interpolate_waypoints_middle():
     waypoints = interpolate_waypoints(
         0.0,
         0.0,
-        4.0,
-        4.0,
+        6.0,
+        6.0,
         n=1,
     )
 
@@ -58,8 +58,8 @@ def test_interpolate_waypoints_middle():
 
     middle = waypoints[1]
 
-    assert middle["latitude"] == approx(2.0)
-    assert middle["longitude"] == approx(2.0)
+    assert middle["latitude"] == approx(3.0)
+    assert middle["longitude"] == approx(3.0)
 
 
 def test_aggregate_risk_empty():
