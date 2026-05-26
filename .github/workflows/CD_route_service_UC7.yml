@@ -32,7 +32,7 @@ jobs:
     # ── 3. ARRANCAR O CONTENTOR ──────────────────────────────────────────
     - name: Arrancar contentor
       run: |+
-        docker run \
+        docker run -d \
           --name ${{ env.IMAGE }} \
           -p ${{ env.PORT }}:${{ env.PORT }} \
           -e API_TOKEN="" \
