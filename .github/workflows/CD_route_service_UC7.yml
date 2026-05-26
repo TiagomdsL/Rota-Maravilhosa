@@ -148,6 +148,7 @@ jobs:
 
     # ── 8. TEST 422 ───────────────────────────────────────────────────────
     - name: POST /route/analyze — campos em falta → 422
+      working-directory: route_service_UC7
       run: |
         python3 - <<'EOF'
         from main import app
