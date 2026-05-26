@@ -81,9 +81,16 @@ jobs:
         curl -sf http://localhost:${{ env.PORT }}/metrics | grep "request_latency_seconds"
 
     # ── 6. DEPENDÊNCIAS ───────────────────────────────────────────────────
-    - name: Instalar dependências para smoke tests
+        - name: Instalar dependências para smoke tests BQ
       run: |
-        pip install fastapi httpx pytest prometheus-client --quiet
+        pip install fastapi httpx pytest \
+          google-cloud-bigquery google-auth \
+          prometheus-client \
+          opentelemetry-api opentelemetry-sdk \
+          opentelemetry-exporter-otlp-proto-http \
+          opentelemetry-instrumentation-fastapi \
+          opentelemetry-instrumentation-httpx \
+          --quiet
 
     # ── 7. TESTE /route/analyze (MOCK CORRETO) ───────────────────────────
     - name: POST /route/analyze — caso normal → 200

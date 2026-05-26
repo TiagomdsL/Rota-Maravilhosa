@@ -114,3 +114,6 @@ def test_interpolate_waypoints_horizontal():
     assert waypoints[0]["latitude"] == approx(0.0)
     assert waypoints[-1]["latitude"] == approx(0.0)
     assert waypoints[-1]["longitude"] == approx(10.0)
+
+
+# test
