@@ -31,14 +31,22 @@ jobs:
 
     # ── 3. ARRANCAR O CONTENTOR ──────────────────────────────────────────
     - name: Arrancar contentor
-      run: |
-        docker run -d \
+      run: |+
+        docker run \
           --name ${{ env.IMAGE }} \
           -p ${{ env.PORT }}:${{ env.PORT }} \
           -e API_TOKEN="" \
           -e PREDICTION_SERVICE_URL="http://localhost:8002" \
           -e OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4318/v1/traces" \
           ${{ env.IMAGE }}:${{ github.sha }}
+          
+    - name: Ver containers
+      if: always()
+      run: docker ps -a
+
+    - name: Logs do container
+      if: always()
+      run: docker logs ${{ env.IMAGE }} || true
 
     # ── 4. AGUARDAR O SERVIÇO ESTAR PRONTO ──────────────────────────────
     - name: Aguardar serviço iniciar
