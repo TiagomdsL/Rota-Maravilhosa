@@ -81,10 +81,9 @@ jobs:
         curl -sf http://localhost:${{ env.PORT }}/metrics | grep "request_latency_seconds"
 
     # ── 6. DEPENDÊNCIAS ───────────────────────────────────────────────────
-    - name: Instalar dependências para smoke tests BQ
+    - name: Instalar dependências para smoke tests
       run: |
         pip install fastapi httpx pytest \
-          google-cloud-bigquery google-auth \
           prometheus-client \
           opentelemetry-api opentelemetry-sdk \
           opentelemetry-exporter-otlp-proto-http \
@@ -92,12 +91,17 @@ jobs:
           opentelemetry-instrumentation-httpx \
           --quiet
 
-    # ── 7. TESTE /route/analyze (MOCK CORRETO) ───────────────────────────
+    # ── 7. TESTE /route/analyze (MOCK CORRIGIDO) ─────────────────────────
     - name: POST /route/analyze — caso normal → 200
       run: |
         python3 - <<'EOF'
         import sys
-        from unittest.mock import patch
+        from unittest.mock import patch, MagicMock
+
+        tracing = MagicMock()
+        tracing.setup_tracing = MagicMock()
+        tracing.get_current_span = MagicMock(return_value=MagicMock())
+        sys.modules["tracing"] = tracing
 
         sys.path.insert(0, "route_service_UC7")
         from main import app
@@ -112,6 +116,7 @@ jobs:
                     "predicted_severity": 2,
                     "nearby_accidents_count": 3
                 }
+
         class FakeClient:
             async def post(self, *args, **kwargs):
                 return FakeResponse()
@@ -131,8 +136,10 @@ jobs:
                 "destination_lon": -118.20,
                 "timestamp": "2022-01-15T08:00:00"
             })
+
             assert r.status_code == 200, r.text
             data = r.json()
+
             assert "risk_score" in data
             assert "risk_level" in data
             assert "recommended_route" in data
