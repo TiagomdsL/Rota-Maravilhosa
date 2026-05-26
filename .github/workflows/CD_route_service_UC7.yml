@@ -4,8 +4,8 @@ on:
   push:
     branches:
       - main
-    paths:
-      - "route_service_UC7/**"
+    #paths:
+     # - "route_service_UC7/**"
 
 env:
   IMAGE: route-service-uc7
