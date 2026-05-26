@@ -81,7 +81,7 @@ jobs:
         curl -sf http://localhost:${{ env.PORT }}/metrics | grep "request_latency_seconds"
 
     # ── 6. DEPENDÊNCIAS ───────────────────────────────────────────────────
-        - name: Instalar dependências para smoke tests BQ
+    - name: Instalar dependências para smoke tests BQ
       run: |
         pip install fastapi httpx pytest \
           google-cloud-bigquery google-auth \
