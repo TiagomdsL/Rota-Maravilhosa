@@ -22,7 +22,8 @@ spec:
         prometheus.io/port: "8000"
         prometheus.io/path: "/metrics"
     spec:
-      securityContext:  # Pod level security context
+      securityContext:
+        # Pod level security context
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
@@ -31,7 +32,8 @@ spec:
         image: us-west4-docker.pkg.dev/proj1cc-493515/rota-maravilhosa/api-gateway:latest
         ports:
         - containerPort: 8000
-        securityContext:  # Container level security context
+        securityContext:
+          # Container level security context
           runAsNonRoot: true
           runAsUser: 1000
           allowPrivilegeEscalation: false
@@ -54,7 +56,7 @@ spec:
           periodSeconds: 10
         readinessProbe:
           httpGet:
-            path: /ready
+            path: /health
             port: 8000
           initialDelaySeconds: 5
           periodSeconds: 5

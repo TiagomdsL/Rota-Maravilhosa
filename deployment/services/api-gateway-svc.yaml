@@ -3,11 +3,12 @@ kind: Service
 metadata:
   name: api-gateway
   namespace: rota-maravilhosa
+  annotations:
+    cloud.google.com/backend-config: '{"default": "api-gateway-hc"}'
 spec:
-  type: LoadBalancer  
+  type: NodePort
   selector:
     app: api-gateway
   ports:
-    - protocol: TCP
-      port: 8000
-      targetPort: 8000
+  - port: 8000
+    targetPort: 8000

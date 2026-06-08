@@ -179,7 +179,7 @@ def fetch_county_comparison(state: str):
 # =============================================================================
 
 
-@app.get("/hotspots")
+@app.get("/analytics/hotspots")
 def get_hotspots(
     city: Optional[str] = Query(None),
     state: Optional[str] = Query(None),
@@ -198,7 +198,7 @@ def get_hotspots(
     return fetch_hotspots(city, state, limit)
 
 
-@app.get("/county-comparison")
+@app.get("/analytics/county-comparison")
 def county_comparison(state: str):
     span = get_current_span()
 

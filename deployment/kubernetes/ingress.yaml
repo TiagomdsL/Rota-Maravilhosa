@@ -7,13 +7,135 @@ metadata:
     kubernetes.io/ingress.class: "gce"
 spec:
   ingressClassName: gce
+
   rules:
   - http:
       paths:
-      - path: /
+
+      - path: /health
         pathType: Prefix
         backend:
           service:
             name: api-gateway
             port:
               number: 8000
+
+      - path: /docs
+        pathType: Prefix
+        backend:
+          service:
+            name: api-gateway
+            port:
+              number: 8000
+
+      - path: /openapi.json
+        pathType: Prefix
+        backend:
+          service:
+            name: api-gateway
+            port:
+              number: 8000
+
+      - path: /login
+        pathType: Prefix
+        backend:
+          service:
+            name: api-gateway
+            port:
+              number: 8000
+
+      - path: /accidents
+        pathType: Prefix
+        backend:
+          service:
+            name: api-gateway
+            port:
+              number: 8000
+
+      - path: /risk
+        pathType: Prefix
+        backend:
+          service:
+            name: prediction-service-uc5-uc6
+            port:
+              number: 8002
+
+      - path: /predict-severity
+        pathType: Prefix
+        backend:
+          service:
+            name: prediction-service-uc5-uc6
+            port:
+              number: 8002
+
+      - path: /route
+        pathType: Prefix
+        backend:
+          service:
+            name: route-service-uc7
+            port:
+              number: 8003
+
+      - path: /analytics/hotspots
+        pathType: Prefix
+        backend:
+          service:
+            name: data-service-uc8-uc11
+            port:
+              number: 8007
+
+      - path: /analytics/county-comparison
+        pathType: Prefix
+        backend:
+          service:
+            name: data-service-uc8-uc11
+            port:
+              number: 8007
+
+      - path: /stats
+        pathType: Prefix
+        backend:
+          service:
+            name: prediction-service-uc9-uc10
+            port:
+              number: 8008
+
+      - path: /accidents/predict-occurrence
+        pathType: Prefix
+        backend:
+          service:
+            name: prediction-service-uc9-uc10
+            port:
+              number: 8008
+
+      - path: /accidents/simulate-risk
+        pathType: Prefix
+        backend:
+          service:
+            name: prediction-service-uc9-uc10
+            port:
+              number: 8008
+
+      - path: /accidents/statistics/by-state
+        pathType: Prefix
+        backend:
+          service:
+            name: data-service-uc123
+            port:
+              number: 8004
+
+      - path: /accidents/weather-analysis
+        pathType: Prefix
+        backend:
+          service:
+            name: data-service-uc123
+            port:
+              number: 8004
+
+      - path: /accidents/temporal-analysis
+        pathType: Prefix
+        backend:
+          service:
+            name: data-service-uc123
+            port:
+              number: 8004
