@@ -173,11 +173,9 @@ def fetch_county_comparison(state: str):
 
     return result
 
-
 # =============================================================================
 # ENDPOINTS
 # =============================================================================
-
 
 @app.get("/analytics/hotspots")
 def get_hotspots(
@@ -196,7 +194,6 @@ def get_hotspots(
     span.set_attribute("business.limit", limit)
 
     return fetch_hotspots(city, state, limit)
-
 
 @app.get("/analytics/county-comparison")
 def county_comparison(state: str):
