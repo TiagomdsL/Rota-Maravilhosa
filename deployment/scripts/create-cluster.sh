@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-CLUSTER_NAME="rota-maravilhosa2-cluster"
-REGION="us-central1-a"
+CLUSTER_NAME="rota-maravilhosa-cluster"
+REGION="us-west4"
 NODE_COUNT=2
 MACHINE_TYPE="e2-standard-2"
 

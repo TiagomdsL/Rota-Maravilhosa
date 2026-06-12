@@ -51,6 +51,8 @@ cd ..
 echo "🔧 Ativando sidecar injection no namespace rota-maravilhosa..."
 kubectl label namespace rota-maravilhosa istio-injection=enabled --overwrite
 
+kubectl annotate deployment keycloak -n rota-maravilhosa sidecar.istio.io/inject="false" --overwrite
+
 # 9. Verificar se a label foi aplicada
 echo "🔍 Verificando label do namespace..."
 kubectl get namespace rota-maravilhosa -o yaml | grep istio-injection

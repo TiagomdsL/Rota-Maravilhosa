@@ -31,6 +31,13 @@ else
     echo "⚠️ Ficheiro bq-key.json não encontrado em $SCRIPT_DIR"
 fi
 
+echo "[3/10] Criando Secret do Keycloak..."
+kubectl create secret generic keycloak-secret \
+    --namespace=$NAMESPACE \
+    --from-literal=client-secret=bEGwBhvpIfQlKCbcLNkLVACoHNyH8Krx \
+    --dry-run=client -o yaml | kubectl apply -f -
+echo "✓ Secret keycloak-secret criada"
+
 echo "[3/9] Verificando modelos no BigQuery..."
 # Verificar se os modelos já existem
 MODELS_EXIST=$(bq ls --models proj1cc-493515:accidents 2>/dev/null | grep -E "severity_model|risk_model|occurrence_model" | wc -l || echo "0")

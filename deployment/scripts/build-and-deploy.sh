@@ -9,18 +9,28 @@ echo "========================================="
 echo "Build e Deploy da Rota Maravilhosa"
 echo "========================================="
 
+# Configurar kubectl para o cluster correto
+echo "[0/6] Configurando kubectl..."
+gcloud container clusters get-credentials rota-maravilhosa-cluster --zone=us-central1-a --project=$PROJECT
+
 if ! kubectl get namespace "$NAMESPACE" &>/dev/null; then
     kubectl create namespace "$NAMESPACE"
 fi
 
-echo "[0/6] Verificando infraestrutura necessaria..."
+echo "[1/6] Verificando infraestrutura necessaria..."
 
 cd "$BASE_DIR/deployment/scripts"
 ./Jaeger.sh
 ./Istio.sh
 ./circuit-breakers.sh
 
+# ATENÇÃO: Isto ativa Istio para todos os pods
 kubectl label namespace $NAMESPACE istio-injection=enabled --overwrite
+
+# MAS desativa especificamente para o Keycloak
+echo "[...] Configurando Keycloak sem Istio..."
+kubectl label namespace $NAMESPACE istio-injection=enabled --overwrite
+kubectl annotate deployment keycloak -n $NAMESPACE sidecar.istio.io/inject="false" --overwrite 2>/dev/null || true
 
 enable_api() {
     local api=$1
@@ -51,10 +61,10 @@ echo "[2/4] Configurando permissoes Cloud Build..."
 PROJECT_NUMBER=$(gcloud projects describe $PROJECT --format="value(projectNumber)")
 gcloud projects add-iam-policy-binding $PROJECT \
     --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" \
-    --role="roles/cloudbuild.builds.builder" --quiet
+    --role="roles/cloudbuild.builds.builder" --quiet 2>/dev/null || true
 gcloud projects add-iam-policy-binding $PROJECT \
     --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" \
-    --role="roles/artifactregistry.writer" --quiet
+    --role="roles/artifactregistry.writer" --quiet 2>/dev/null || true
 
 echo "[3/4] Instalando nginx ingress controller..."
 if ! kubectl get namespace ingress-nginx &>/dev/null; then
@@ -71,6 +81,7 @@ gcloud builds submit "$BASE_DIR" \
 
 echo "[5/5] Fazendo deploy no Kubernetes..."
 cd "$BASE_DIR/deployment/scripts"
+
 ./deploy-app.sh
 
 INGRESS_IP=$(kubectl get ingress rota-maravilhosa-ingress -n $NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
@@ -80,6 +91,7 @@ echo "Concluido"
 echo "========================================="
 if [ -n "$INGRESS_IP" ]; then
     echo "API disponivel em: http://$INGRESS_IP/health"
+    echo "Swagger disponivel em: http://$INGRESS_IP/docs"
 else
-    echo "Verifica IP com: kubectl get ingress -n $NAMESPACE"
+    echo "Verifica IP com: kubectl get ingress -n $NAMESPACE -w"
 fi
