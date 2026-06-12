@@ -13,7 +13,7 @@ if ! kubectl get namespace "$NAMESPACE" &>/dev/null; then
     kubectl create namespace "$NAMESPACE"
 fi
 
-echo "[0/6] Verificando infraestrutura necessária..."
+echo "[0/6] Verificando infraestrutura necessaria..."
 
 cd "$BASE_DIR/deployment/scripts"
 ./Jaeger.sh
@@ -30,25 +30,24 @@ enable_api() {
     for i in $(seq 1 $max_retries); do
         echo "Tentativa $i: Habilitando $api..."
         if gcloud services enable "$api" --project $PROJECT 2>/dev/null; then
-            echo "✓ $api habilitada com sucesso"
+            echo "$api habilitada com sucesso"
             return 0
         else
             if [ $i -lt $max_retries ]; then
                 echo "  Erro. Aguardando ${retry_delay}s antes de tentar novamente..."
                 sleep $retry_delay
-                retry_delay=$((retry_delay * 2))  # Exponential backoff
+                retry_delay=$((retry_delay * 2))
             fi
         fi
     done
-    echo "✗ Falha ao habilitar $api após $max_retries tentativas"
+    echo "Falha ao habilitar $api apos $max_retries tentativas"
     return 1
 }
 
-# Habilitar APIs uma por uma
 enable_api "cloudbuild.googleapis.com"
 enable_api "artifactregistry.googleapis.com"
 
-echo "[2/4] Configurando permissões Cloud Build..."
+echo "[2/4] Configurando permissoes Cloud Build..."
 PROJECT_NUMBER=$(gcloud projects describe $PROJECT --format="value(projectNumber)")
 gcloud projects add-iam-policy-binding $PROJECT \
     --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" \
@@ -57,22 +56,30 @@ gcloud projects add-iam-policy-binding $PROJECT \
     --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" \
     --role="roles/artifactregistry.writer" --quiet
 
-echo "[3/4] Building e pushing imagens..."
+echo "[3/4] Instalando nginx ingress controller..."
+if ! kubectl get namespace ingress-nginx &>/dev/null; then
+    kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.8.1/deploy/static/provider/cloud/deploy.yaml
+    echo "Aguardando ingress controller ficar pronto..."
+    sleep 30
+    kubectl wait --namespace ingress-nginx --for=condition=ready pod --selector=app.kubernetes.io/component=controller --timeout=120s 2>/dev/null || true
+fi
+
+echo "[4/4] Building e pushing imagens..."
 gcloud builds submit "$BASE_DIR" \
     --config "$BASE_DIR/cloudbuild.yaml" \
     --project $PROJECT
 
-echo "[4/4] Fazendo deploy no Kubernetes..."
+echo "[5/5] Fazendo deploy no Kubernetes..."
 cd "$BASE_DIR/deployment/scripts"
 ./deploy-app.sh
 
 INGRESS_IP=$(kubectl get ingress rota-maravilhosa-ingress -n $NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
 echo ""
 echo "========================================="
-echo "Concluído!"
+echo "Concluido"
 echo "========================================="
 if [ -n "$INGRESS_IP" ]; then
-    echo "API disponível em: http://$INGRESS_IP/health"
+    echo "API disponivel em: http://$INGRESS_IP/health"
 else
     echo "Verifica IP com: kubectl get ingress -n $NAMESPACE"
 fi
