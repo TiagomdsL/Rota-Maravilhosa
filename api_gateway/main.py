@@ -1,7 +1,10 @@
 from datetime import datetime
-from typing import Optional  
+from typing import Optional
+
 from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi.openapi.utils import get_openapi
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+from jose import jwt
 import time
 from pydantic import BaseModel
 import httpx
@@ -10,10 +13,28 @@ import logging
 
 from tracing import setup_tracing, get_current_span
 
+# ─────────────────────────────
+# APP INIT
+# ─────────────────────────────
+
 app = FastAPI(title="API Gateway")
 setup_tracing(app, "api-gateway")
 
 logger = logging.getLogger(__name__)
+
+# ─────────────────────────────
+# KEYCLOAK CONFIG
+# ─────────────────────────────
+
+KEYCLOAK_ENABLED = os.getenv("KEYCLOAK_ENABLED", "false").lower() == "true"
+KEYCLOAK_URL = os.getenv("KEYCLOAK_URL", "http://keycloak.rota-maravilhosa:8080")
+REALM = os.getenv("KEYCLOAK_REALM", "master")
+CLIENT_ID = os.getenv("KEYCLOAK_CLIENT_ID", "api-gateway")
+CLIENT_SECRET = os.getenv("KEYCLOAK_CLIENT_SECRET", "")
+
+# ─────────────────────────────
+# METRICS
+# ─────────────────────────────
 
 REQUEST_COUNT = Counter(
     "requests_total",
@@ -35,6 +56,23 @@ ERROR_COUNT = Counter(
 
 SERVICE_NAME = "api-gateway"
 
+# ─────────────────────────────
+# HTTP CLIENT
+# ─────────────────────────────
+
+client = httpx.AsyncClient(timeout=30.0)
+
+DATA_SERVICE_URL = os.getenv("DATA_SERVICE_URL", "http://localhost:8001")
+PREDICTION_SERVICE_URL = os.getenv("PREDICTION_SERVICE_URL", "http://localhost:8002")
+ROUTE_SERVICE_URL = os.getenv("ROUTE_SERVICE_URL", "http://localhost:8003")
+DATA_SERVICE_URL_UC123 = os.getenv("DATA_SERVICE_URL_UC123", "http://localhost:8004")
+DATA_SERVICE_UC8_UC11_URL = os.getenv("DATA_SERVICE_UC8_UC11_URL", "http://localhost:8007")
+PREDICTION_SERVICE_UC9_UC10_URL = os.getenv("PREDICTION_SERVICE_UC9_UC10_URL", "http://localhost:8008")
+
+# ─────────────────────────────
+# METRICS MIDDLEWARE
+# ─────────────────────────────
+
 @app.middleware("http")
 async def metrics_middleware(request: Request, call_next):
     start = time.time()
@@ -52,20 +90,92 @@ async def metrics_middleware(request: Request, call_next):
         return response
 
     finally:
-        duration = time.time() - start
-        REQUEST_LATENCY.labels(service=SERVICE_NAME).observe(duration)
+        REQUEST_LATENCY.labels(service=SERVICE_NAME).observe(time.time() - start)
 
 @app.get("/metrics")
 def metrics():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
-client = httpx.AsyncClient(timeout=30.0)
-DATA_SERVICE_URL = os.getenv("DATA_SERVICE_URL", "http://localhost:8001")
-PREDICTION_SERVICE_URL = os.getenv("PREDICTION_SERVICE_URL", "http://localhost:8002")
-ROUTE_SERVICE_URL = os.getenv("ROUTE_SERVICE_URL", "http://localhost:8003")
-DATA_SERVICE_URL_UC123 = os.getenv("DATA_SERVICE_URL_UC123", "http://localhost:8004")
-DATA_SERVICE_UC8_UC11_URL = os.getenv("DATA_SERVICE_UC8_UC11_URL", "http://localhost:8007")
-PREDICTION_SERVICE_UC9_UC10_URL = os.getenv("PREDICTION_SERVICE_UC9_UC10_URL", "http://localhost:8008")
+# ─────────────────────────────
+# AUTH MIDDLEWARE (KEYCLOAK)
+# ─────────────────────────────
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    if not KEYCLOAK_ENABLED:
+        return await call_next(request)
+
+    public_paths = [
+        "/docs",
+        "/openapi.json",
+        "/health",
+        "/metrics",
+        "/ready"
+    ]
+
+    if any(request.url.path.startswith(p) for p in public_paths):
+        return await call_next(request)
+
+    auth = request.headers.get("Authorization")
+
+    if not auth:
+        raise HTTPException(status_code=401, detail="Missing token")
+
+    token = auth.replace("Bearer ", "")
+
+    try:
+        payload = jwt.get_unverified_claims(token)
+        expected_iss = f"{KEYCLOAK_URL}/realms/{REALM}"
+        if payload.get("iss") != expected_iss:
+            raise Exception("Invalid issuer")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    return await call_next(request)
+
+# ─────────────────────────────
+# CUSTOM OPENAPI (SWAGGER AUTHORIZE)
+# ─────────────────────────────
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+
+    openapi_schema = get_openapi(
+        title="API Gateway",
+        version="1.0.0",
+        description="API Gateway com autenticacao Keycloak",
+        routes=app.routes,
+    )
+
+    if KEYCLOAK_ENABLED:
+        openapi_schema["components"] = openapi_schema.get("components", {})
+        openapi_schema["components"]["securitySchemes"] = {
+            "oauth2": {
+                "type": "oauth2",
+                "flows": {
+                    "password": {
+                        "tokenUrl": f"{KEYCLOAK_URL}/realms/{REALM}/protocol/openid-connect/token",
+                        "scopes": {}
+                    }
+                }
+            },
+            "bearerAuth": {
+                "type": "http",
+                "scheme": "bearer",
+                "bearerFormat": "JWT"
+            }
+        }
+        openapi_schema["security"] = [{"bearerAuth": []}]
+
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+app.openapi = custom_openapi
+
+# ─────────────────────────────
+# MODELS
+# ─────────────────────────────
 
 class SeverityInput(BaseModel):
     visibility: float
@@ -97,46 +207,23 @@ class SimulateRequest(BaseModel):
     weather_condition: str
     road_topology: str
 
-async def forward_request(
-    service_url: str,
-    endpoint: str,
-    params: dict = None
-):
-    url = f"{service_url}{endpoint}"
-
-    try:
-        response = await client.get(url, params=params)
-        response.raise_for_status()
-        return response.json()
-
-    except httpx.TimeoutException:
-        logger.error(f"Timeout calling {url}")
-        raise HTTPException(status_code=504, detail="Service timeout")
-    except httpx.HTTPStatusError as e:
-        logger.error(f"HTTP error from {url}: {e.response.status_code}")
-        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
-    except Exception as e:
-        logger.error(f"Error calling {url}: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+# ─────────────────────────────
+# ROUTES
+# ─────────────────────────────
 
 @app.get("/health")
 async def health():
-    logger.info("Health check requested")
     return {"gateway": "ok"}
 
 @app.get("/ready")
-async def ready(request: Request):
+async def ready():
     return {"status": "ready"}
 
 @app.post("/accidents/predict-severity")
 async def gateway_predict_severity(input_data: SeverityInput):
     span = get_current_span()
-    span.set_attribute("business.visibility", input_data.visibility)
-    span.set_attribute("business.precipitation", input_data.precipitation)
     span.set_attribute("business.weather_condition", input_data.weather_condition)
-    
-    logger.info(f"Predict severity request: visibility={input_data.visibility}, precipitation={input_data.precipitation}")
-    
+
     try:
         response = await client.post(
             f"{PREDICTION_SERVICE_URL}/predict-severity",
@@ -144,9 +231,9 @@ async def gateway_predict_severity(input_data: SeverityInput):
         )
         response.raise_for_status()
         return response.json()
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
-    
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/accidents/bounding-box")
 async def bounding_box(
     min_lat: float,
@@ -155,76 +242,37 @@ async def bounding_box(
     max_lon: float,
     limit: int = 100
 ):
-    span = get_current_span()
-    span.set_attribute("business.min_lat", min_lat)
-    span.set_attribute("business.max_lat", max_lat)
-    span.set_attribute("business.min_lon", min_lon)
-    span.set_attribute("business.max_lon", max_lon)
-    span.set_attribute("business.limit", limit)
-    
-    logger.info(f"Bounding box request: ({min_lat},{min_lon}) to ({max_lat},{max_lon})")
-    
-    try:
-        response = await client.get(
-            f"{DATA_SERVICE_URL}/accidents/bounding-box",
-            params={
-                "min_lat": min_lat,
-                "max_lat": max_lat,
-                "min_lon": min_lon,
-                "max_lon": max_lon,
-                "limit": limit
-            }
-        )
-        response.raise_for_status()
-        return response.json()
-    except httpx.HTTPError as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
+    response = await client.get(
+        f"{DATA_SERVICE_URL}/accidents/bounding-box",
+        params={
+            "min_lat": min_lat,
+            "max_lat": max_lat,
+            "min_lon": min_lon,
+            "max_lon": max_lon,
+            "limit": limit
+        }
+    )
+    return response.json()
+
 @app.post("/risk/score")
 async def gateway_risk_score(body: RiskRequest):
-    span = get_current_span()
-    span.set_attribute("business.latitude", body.latitude)
-    span.set_attribute("business.longitude", body.longitude)
-    
-    logger.info(f"Risk score request for location: ({body.latitude}, {body.longitude})")
-    
-    try:
-        response = await client.post(
-            f"{PREDICTION_SERVICE_URL}/risk/score",
-            json={
-                "latitude": body.latitude,
-                "longitude": body.longitude,
-                "timestamp": body.timestamp.isoformat(),
-            }
-        )
-        response.raise_for_status()
-        return response.json()
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
-    except httpx.HTTPError as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
+    response = await client.post(
+        f"{PREDICTION_SERVICE_URL}/risk/score",
+        json={
+            "latitude": body.latitude,
+            "longitude": body.longitude,
+            "timestamp": body.timestamp.isoformat(),
+        }
+    )
+    return response.json()
+
 @app.post("/route/analyze")
 async def gateway_route_analyze(body: RouteRequest):
-    span = get_current_span()
-    span.set_attribute("business.origin_lat", body.origin_lat)
-    span.set_attribute("business.origin_lon", body.origin_lon)
-    span.set_attribute("business.destination_lat", body.destination_lat)
-    span.set_attribute("business.destination_lon", body.destination_lon)
-    
-    logger.info(f"Route analysis from ({body.origin_lat},{body.origin_lon}) to ({body.destination_lat},{body.destination_lon})")
-    
-    try:
-        response = await client.post(
-            f"{ROUTE_SERVICE_URL}/route/analyze",
-            json=body.dict()
-        )
-        response.raise_for_status()
-        return response.json()
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
-    except httpx.HTTPError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    response = await client.post(
+        f"{ROUTE_SERVICE_URL}/route/analyze",
+        json=body.dict()
+    )
+    return response.json()
 
 @app.get("/analytics/hotspots")
 async def get_hotspots(
@@ -232,163 +280,68 @@ async def get_hotspots(
     state: Optional[str] = Query(None),
     limit: int = 10
 ):
-    span = get_current_span()
-    if city:
-        span.set_attribute("business.city", city)
-    if state:
-        span.set_attribute("business.state", state)
-    span.set_attribute("business.limit", limit)
-    
-    logger.info(f"Hotspots request: city={city}, state={state}, limit={limit}")
-    
-    try:
-        response = await client.get(
-            f"{DATA_SERVICE_UC8_UC11_URL}/hotspots",
-            params={"city": city, "state": state, "limit": limit}
-        )
-        response.raise_for_status()
-        return response.json()
-
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
-    except httpx.HTTPError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    response = await client.get(
+        f"{DATA_SERVICE_UC8_UC11_URL}/hotspots",
+        params={"city": city, "state": state, "limit": limit}
+    )
+    return response.json()
 
 @app.get("/analytics/county-comparison")
 async def county_comparison(state: str):
-    span = get_current_span()
-    span.set_attribute("business.state", state)
-    
-    logger.info(f"County comparison request for state: {state}")
-    
-    try:
-        response = await client.get(
-            f"{DATA_SERVICE_UC8_UC11_URL}/county-comparison",
-            params={"state": state}
-        )
-        response.raise_for_status()
-        return response.json()
+    response = await client.get(
+        f"{DATA_SERVICE_UC8_UC11_URL}/county-comparison",
+        params={"state": state}
+    )
+    return response.json()
 
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
-    except httpx.HTTPError as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
 @app.post("/accidents/predict-occurrence")
 async def predict_occurrence(payload: PredictRequest):
-    span = get_current_span()
-    span.set_attribute("business.latitude", payload.latitude)
-    span.set_attribute("business.longitude", payload.longitude)
-    span.set_attribute("business.hour", payload.hour)
-    span.set_attribute("business.weather_condition", payload.weather_condition)
-    
-    logger.info(f"Predict occurrence: lat={payload.latitude}, lon={payload.longitude}, hour={payload.hour}")
-    
-    try:
-        response = await client.post(
-            f"{PREDICTION_SERVICE_UC9_UC10_URL}/accidents/predict-occurrence",
-            json=payload.dict()
-        )
-        response.raise_for_status()
-        return response.json()
-
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
-    except httpx.HTTPError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    response = await client.post(
+        f"{PREDICTION_SERVICE_UC9_UC10_URL}/accidents/predict-occurrence",
+        json=payload.dict()
+    )
+    return response.json()
 
 @app.post("/accidents/simulate-risk")
 async def simulate_risk(payload: SimulateRequest):
-    span = get_current_span()
-    span.set_attribute("business.latitude", payload.latitude)
-    span.set_attribute("business.longitude", payload.longitude)
-    span.set_attribute("business.hour", payload.hour)
-    span.set_attribute("business.weather_condition", payload.weather_condition)
-    span.set_attribute("business.road_topology", payload.road_topology)
-    
-    logger.info(f"Simulate risk: lat={payload.latitude}, hour={payload.hour}, road={payload.road_topology}")
-    
-    try:
-        response = await client.post(
-            f"{PREDICTION_SERVICE_UC9_UC10_URL}/accidents/simulate-risk",
-            json=payload.dict()
-        )
-        response.raise_for_status()
-        return response.json()
-
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
-    except httpx.HTTPError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    response = await client.post(
+        f"{PREDICTION_SERVICE_UC9_UC10_URL}/accidents/simulate-risk",
+        json=payload.dict()
+    )
+    return response.json()
 
 @app.get("/stats")
 async def get_stats():
-    logger.info("Stats request")
-    
-    try:
-        response = await client.get(f"{PREDICTION_SERVICE_UC9_UC10_URL}/stats")
-        response.raise_for_status()
-        return response.json()
-
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
-    except httpx.HTTPError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    response = await client.get(
+        f"{PREDICTION_SERVICE_UC9_UC10_URL}/stats"
+    )
+    return response.json()
 
 @app.get("/accidents/statistics/by-state")
 async def get_accident_stats_by_state(
-    state: str = Query(..., description="US state name or code"),
-    start_date: str = Query(..., description="Start date (YYYY-MM-DD)"),
-    end_date: str = Query(..., description="End date (YYYY-MM-DD)")
+    state: str,
+    start_date: str,
+    end_date: str
 ):
-    span = get_current_span()
-    span.set_attribute("business.state", state)
-    span.set_attribute("business.start_date", start_date)
-    span.set_attribute("business.end_date", end_date)
-    
-    logger.info(f"Statistics by state: {state} from {start_date} to {end_date}")
-    
-    return await forward_request(
-        DATA_SERVICE_URL_UC123,
-        "/accidents/statistics/by-state",
+    return await client.get(
+        f"{DATA_SERVICE_URL_UC123}/accidents/statistics/by-state",
         params={"state": state, "start_date": start_date, "end_date": end_date}
     )
 
 @app.get("/accidents/weather-analysis")
-async def analyze_by_weather(
-    state: Optional[str] = Query(None, description="Filter by state name or code")
-):
-    span = get_current_span()
-    if state:
-        span.set_attribute("business.state", state)
-    
-    logger.info(f"Weather analysis request for state: {state}")
-    
-    params = {"state": state} if state else {}
-    return await forward_request(
-        DATA_SERVICE_URL_UC123,
-        "/accidents/weather-analysis",
-        params=params
+async def analyze_by_weather(state: Optional[str] = None):
+    return await client.get(
+        f"{DATA_SERVICE_URL_UC123}/accidents/weather-analysis",
+        params={"state": state}
     )
 
 @app.get("/accidents/temporal-analysis")
-async def get_temporal_analysis(
-    city: str = Query(..., description="City name"),
-    day_of_week: Optional[str] = Query(None, description="Filter by day of week")
-):
-    span = get_current_span()
-    span.set_attribute("business.city", city)
-    if day_of_week:
-        span.set_attribute("business.day_of_week", day_of_week)
-    
-    logger.info(f"Temporal analysis for city: {city}, day: {day_of_week}")
-    
+async def get_temporal_analysis(city: str, day_of_week: Optional[str] = None):
     params = {"city": city}
     if day_of_week:
         params["day_of_week"] = day_of_week
 
-    return await forward_request(
-        DATA_SERVICE_URL_UC123,
-        "/accidents/temporal-analysis",
+    return await client.get(
+        f"{DATA_SERVICE_URL_UC123}/accidents/temporal-analysis",
         params=params
     )

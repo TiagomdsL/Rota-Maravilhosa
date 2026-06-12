@@ -78,3 +78,16 @@ spec:
           value: "http://prediction-service-uc9-uc10:8008"
         - name: ROUTE_SERVICE_URL
           value: "http://route-service-uc7:8003"
+        - name: KEYCLOAK_ENABLED
+          value: "true"
+        - name: KEYCLOAK_URL
+          value: "http://keycloak.rota-maravilhosa:8080"
+        - name: KEYCLOAK_REALM
+          value: "master"
+        - name: KEYCLOAK_CLIENT_ID
+          value: "api-gateway"
+        - name: KEYCLOAK_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: keycloak-secret
+              key: client-secret
