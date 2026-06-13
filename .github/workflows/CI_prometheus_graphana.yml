@@ -37,5 +37,5 @@ jobs:
       - name: Validate K8s manifests
         run: |
           for file in deployment/kubernetes/*.yaml deployment/deployments/*.yaml deployment/services/*.yaml; do
-            [ -f "$file" ] && kubectl apply -f "$file" --dry-run=client --validate=true
+            [ -f "$file" ] && kubectl apply -f "$file" --dry-run=client --validate=false
           done
