@@ -18,8 +18,12 @@ jobs:
       
       - name: Validate Prometheus
         run: |
-          docker run --rm -v $(pwd):/mnt prom/prometheus:latest \
-            promtool check config /mnt/deployment/kubernetes/prometheus_configmap.yaml
+          grep -A9999 'prometheus.yml:' deployment/kubernetes/prometheus_configmap.yaml \
+            | tail -n +2 \
+            | sed 's/^    //' > /tmp/prometheus.yml
+          docker run --rm --entrypoint /bin/promtool \
+            -v /tmp:/mnt prom/prometheus:latest \
+            check config /mnt/prometheus.yml
       
       - name: Validate Grafana dashboards (JSON)
         run: |
