@@ -1,7 +1,7 @@
 #!/bin/bash
 
 set -e
-
+#Ci test
 NAMESPACE="rota-maravilhosa"
 DEPLOYMENT=$1
 
