@@ -1,7 +1,7 @@
 #!/bin/bash
 
 set -e
-
+#test
 NAMESPACE="rota-maravilhosa"
 DEPLOYMENT=$1
 

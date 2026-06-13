@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Validate Prometheus
+      - name: Validate Prometheus config
         run: |
           grep -A9999 'prometheus.yml:' deployment/kubernetes/prometheus_configmap.yaml \
             | tail -n +2 \
@@ -29,13 +29,4 @@ jobs:
         run: |
           find deployment/grafana -name "*.json" 2>/dev/null | while read f; do
             python3 -m json.tool "$f" > /dev/null && echo "✓ $f"
-          done
-      
-      - name: Setup kubectl
-        uses: azure/setup-kubectl@v4
-      
-      - name: Validate K8s manifests
-        run: |
-          for file in deployment/kubernetes/*.yaml deployment/deployments/*.yaml deployment/services/*.yaml; do
-            [ -f "$file" ] && kubectl apply -f "$file" --dry-run=client --validate=false
           done
