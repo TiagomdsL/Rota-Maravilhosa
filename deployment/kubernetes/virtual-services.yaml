@@ -1,0 +1,137 @@
+# virtual-services.yaml
+# Timeout e Retry para todos os serviços via Istio VirtualService.
+# Complementa os DestinationRules (circuit-breakers/) já existentes.
+# perTryTimeout × attempts < timeout do serviço upstream (api-gateway 60s)
+
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: vs-api-gateway
+  namespace: rota-maravilhosa
+spec:
+  hosts:
+    - api-gateway
+  http:
+    - timeout: 60s
+      retries:
+        attempts: 2
+        perTryTimeout: 25s
+        retryOn: gateway-error,connect-failure,reset,retriable-4xx
+      route:
+        - destination:
+            host: api-gateway
+
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: vs-prediction-service-uc5-uc6
+  namespace: rota-maravilhosa
+spec:
+  hosts:
+    - prediction-service-uc5-uc6
+  http:
+    - timeout: 30s
+      retries:
+        attempts: 3
+        perTryTimeout: 9s
+        retryOn: gateway-error,connect-failure,reset,retriable-4xx
+      route:
+        - destination:
+            host: prediction-service-uc5-uc6
+
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: vs-prediction-service-uc9-uc10
+  namespace: rota-maravilhosa
+spec:
+  hosts:
+    - prediction-service-uc9-uc10
+  http:
+    - timeout: 30s
+      retries:
+        attempts: 3
+        perTryTimeout: 9s
+        retryOn: gateway-error,connect-failure,reset,retriable-4xx
+      route:
+        - destination:
+            host: prediction-service-uc9-uc10
+
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: vs-data-service-uc123
+  namespace: rota-maravilhosa
+spec:
+  hosts:
+    - data-service-uc123
+  http:
+    - timeout: 15s
+      retries:
+        attempts: 2
+        perTryTimeout: 6s
+        retryOn: gateway-error,connect-failure,reset
+      route:
+        - destination:
+            host: data-service-uc123
+
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: vs-data-service-uc4
+  namespace: rota-maravilhosa
+spec:
+  hosts:
+    - data-service-uc4
+  http:
+    - timeout: 15s
+      retries:
+        attempts: 2
+        perTryTimeout: 6s
+        retryOn: gateway-error,connect-failure,reset
+      route:
+        - destination:
+            host: data-service-uc4
+
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: vs-data-service-uc8-uc11
+  namespace: rota-maravilhosa
+spec:
+  hosts:
+    - data-service-uc8-uc11
+  http:
+    - timeout: 15s
+      retries:
+        attempts: 2
+        perTryTimeout: 6s
+        retryOn: gateway-error,connect-failure,reset
+      route:
+        - destination:
+            host: data-service-uc8-uc11
+
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: vs-route-service-uc7
+  namespace: rota-maravilhosa
+spec:
+  hosts:
+    - route-service-uc7
+  http:
+    - timeout: 10s
+      retries:
+        attempts: 2
+        perTryTimeout: 4s
+        retryOn: gateway-error,connect-failure,reset
+      route:
+        - destination:
+            host: route-service-uc7

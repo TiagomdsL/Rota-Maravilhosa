@@ -11,7 +11,7 @@ echo "========================================="
 
 # Configurar kubectl para o cluster correto
 echo "[0/6] Configurando kubectl..."
-gcloud container clusters get-credentials rota-maravilhosa-cluster --zone=us-central1-a --project=$PROJECT
+gcloud container clusters get-credentials rota-maravilhosa-cluster --zone=us-west4 --project=$PROJECT
 
 if ! kubectl get namespace "$NAMESPACE" &>/dev/null; then
     kubectl create namespace "$NAMESPACE"
@@ -28,9 +28,9 @@ cd "$BASE_DIR/deployment/scripts"
 kubectl label namespace $NAMESPACE istio-injection=enabled --overwrite
 
 # MAS desativa especificamente para o Keycloak
-echo "[...] Configurando Keycloak sem Istio..."
-kubectl label namespace $NAMESPACE istio-injection=enabled --overwrite
-kubectl annotate deployment keycloak -n $NAMESPACE sidecar.istio.io/inject="false" --overwrite 2>/dev/null || true
+#echo "[...] Configurando Keycloak sem Istio..."
+#kubectl label namespace $NAMESPACE istio-injection=enabled --overwrite
+#kubectl annotate deployment keycloak -n $NAMESPACE sidecar.istio.io/inject="false" --overwrite 2>/dev/null || true
 
 enable_api() {
     local api=$1
