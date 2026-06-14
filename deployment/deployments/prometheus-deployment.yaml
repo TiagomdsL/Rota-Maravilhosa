@@ -18,37 +18,37 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-        - name: prometheus
-          image: prom/prometheus:latest
-          args:
-            - "--config.file=/etc/prometheus/prometheus.yml"
-            - "--storage.tsdb.path=/prometheus"
-          ports:
-            - containerPort: 9090
-          securityContext:
-            runAsNonRoot: true
-            runAsUser: 65534
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false
-            capabilities:
-              drop:
-              - ALL
-          resources:
-            requests:
-              cpu: "200m"
-              memory: "512Mi"
-            limits:
-              cpu: "1000m"
-              memory: "1Gi"
-          volumeMounts:
-            - name: config
-              mountPath: /etc/prometheus/prometheus.yml
-              subPath: prometheus.yml
-            - name: storage
-              mountPath: /prometheus
-      volumes:
+      - name: prometheus
+        image: prom/prometheus:latest
+        args:
+        - "--config.file=/etc/prometheus/prometheus.yml"
+        - "--storage.tsdb.path=/prometheus"
+        ports:
+        - containerPort: 9090
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65534
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: "25m"
+            memory: "250Mi"
+          limits:
+            cpu: "800m"
+            memory: "3G"
+        volumeMounts:
         - name: config
-          configMap:
-            name: prometheus-cm
+          mountPath: /etc/prometheus/prometheus.yml
+          subPath: prometheus.yml
         - name: storage
-          emptyDir: {}
+          mountPath: /prometheus
+      volumes:
+      - name: config
+        configMap:
+          name: prometheus-cm
+      - name: storage
+        emptyDir: {}

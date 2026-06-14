@@ -22,7 +22,7 @@ spec:
         prometheus.io/port: "8001"
         prometheus.io/path: "/metrics"
     spec:
-      securityContext:  
+      securityContext:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
@@ -31,7 +31,7 @@ spec:
         image: us-west4-docker.pkg.dev/proj1cc-493515/rota-maravilhosa/data-service-uc4:latest
         ports:
         - containerPort: 8001
-        securityContext:  
+        securityContext:
           runAsNonRoot: true
           runAsUser: 1000
           allowPrivilegeEscalation: false
@@ -41,11 +41,11 @@ spec:
             - ALL
         resources:
           requests:
-            cpu: "50m"
-            memory: "512Mi"
+            cpu: "25m"
+            memory: "250Mi"
           limits:
-            cpu: "200m"
-            memory: "1Gi"
+            cpu: "800m"
+            memory: "8Gi"
         livenessProbe:
           httpGet:
             path: /health

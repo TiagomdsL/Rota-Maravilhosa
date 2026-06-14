@@ -23,7 +23,7 @@ spec:
         prometheus.io/path: "/metrics"
     spec:
       securityContext:
-        # Pod level security context
+
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
@@ -33,7 +33,6 @@ spec:
         ports:
         - containerPort: 8000
         securityContext:
-          # Container level security context
           runAsNonRoot: true
           runAsUser: 1000
           allowPrivilegeEscalation: false
@@ -43,11 +42,11 @@ spec:
             - ALL
         resources:
           requests:
-            cpu: "100m"
-            memory: "128Mi"
+            cpu: "25m"
+            memory: "250Mi"
           limits:
-            cpu: "500m"
-            memory: "256Mi"
+            cpu: "800m"
+            memory: "6G"
         livenessProbe:
           httpGet:
             path: /health
@@ -86,8 +85,8 @@ spec:
           value: "master"
         - name: KEYCLOAK_CLIENT_ID
           value: "api-gateway"
-        - name: KEYCLOAK_CLIENT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: keycloak-secret
-              key: client-secret
+        #- name: KEYCLOAK_CLIENT_SECRET
+        #  valueFrom:
+        #    secretKeyRef:
+        #      name: keycloak-secret
+        #      key: client-secret

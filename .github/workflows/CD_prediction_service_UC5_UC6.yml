@@ -3,9 +3,9 @@ name: CD — prediction-service-uc5-uc6
 on:
   push:
     branches:
-      - main
+    - main
     paths:
-      - "prediction_service_UC5_UC6/**"
+    - "prediction_service_UC5_UC6/**"
 
 env:
   IMAGE: prediction-service-uc5-uc6
@@ -17,250 +17,250 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ── 1. CHECKOUT ──────────────────────────────────────────────────────
-      - name: Checkout código
-        uses: actions/checkout@v4
+    # ── 1. CHECKOUT ──────────────────────────────────────────────────────
+    - name: Checkout código
+      uses: actions/checkout@v4
 
-      # ── 2. BUILD DA IMAGEM ───────────────────────────────────────────────
-      - name: Build Docker image
-        run: |
-          docker build \
-            -t ${{ env.IMAGE }}:${{ github.sha }} \
-            -t ${{ env.IMAGE }}:latest \
-            ./prediction_service_UC5_UC6
+    # ── 2. BUILD DA IMAGEM ───────────────────────────────────────────────
+    - name: Build Docker image
+      run: |
+        docker build \
+          -t ${{ env.IMAGE }}:${{ github.sha }} \
+          -t ${{ env.IMAGE }}:latest \
+          ./prediction_service_UC5_UC6
 
-      # ── 3. ARRANCAR O CONTENTOR ──────────────────────────────────────────
-      - name: Arrancar contentor
-        run: |
-          docker run -d \
-            --name ${{ env.IMAGE }} \
-            -p ${{ env.PORT }}:${{ env.PORT }} \
-            -e API_TOKEN="" \
-            -e DATA_SERVICE_URL="http://localhost:8001" \
-            -e OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4318/v1/traces" \
-            ${{ env.IMAGE }}:${{ github.sha }}
+    # ── 3. ARRANCAR O CONTENTOR ──────────────────────────────────────────
+    - name: Arrancar contentor
+      run: |
+        docker run -d \
+          --name ${{ env.IMAGE }} \
+          -p ${{ env.PORT }}:${{ env.PORT }} \
+          -e API_TOKEN="" \
+          -e DATA_SERVICE_URL="http://localhost:8001" \
+          -e OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4318/v1/traces" \
+          ${{ env.IMAGE }}:${{ github.sha }}
 
-      # ── 4. AGUARDAR O SERVIÇO ESTAR PRONTO ──────────────────────────────
-      - name: Aguardar serviço iniciar
-        run: |
-          for i in $(seq 1 20); do
-            if curl -sf http://localhost:${{ env.PORT }}/health > /dev/null; then
-              echo "Serviço disponível após ${i}s"
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "Timeout: serviço não respondeu"
-          docker logs ${{ env.IMAGE }}
-          exit 1
+    # ── 4. AGUARDAR O SERVIÇO ESTAR PRONTO ──────────────────────────────
+    - name: Aguardar serviço iniciar
+      run: |
+        for i in $(seq 1 20); do
+          if curl -sf http://localhost:${{ env.PORT }}/health > /dev/null; then
+            echo "Serviço disponível após ${i}s"
+            exit 0
+          fi
+          sleep 1
+        done
+        echo "Timeout: serviço não respondeu"
+        docker logs ${{ env.IMAGE }}
+        exit 1
 
-      # ── 5. SMOKE TESTS — ENDPOINTS SEM BQ ───────────────────────────────
+    # ── 5. SMOKE TESTS — ENDPOINTS SEM BQ ───────────────────────────────
 
-      - name: "GET /health → 200 + {status: ok}"
-        run: |
-          BODY=$(curl -sf http://localhost:${{ env.PORT }}/health)
-          echo "Response: $BODY"
-          echo "$BODY" | python3 -c "
-          import sys, json
-          d = json.load(sys.stdin)
-          assert d.get('status') == 'ok', f'Esperado ok, obtido: {d}'
-          print('OK')
-          "
+    - name: "GET /health → 200 + {status: ok}"
+      run: |
+        BODY=$(curl -sf http://localhost:${{ env.PORT }}/health)
+        echo "Response: $BODY"
+        echo "$BODY" | python3 -c "
+        import sys, json
+        d = json.load(sys.stdin)
+        assert d.get('status') == 'ok', f'Esperado ok, obtido: {d}'
+        print('OK')
+        "
 
-      - name: "GET /ready → 200 + {status: ok}"
-        run: |
-          BODY=$(curl -sf http://localhost:${{ env.PORT }}/ready)
-          echo "Response: $BODY"
-          echo "$BODY" | python3 -c "
-          import sys, json
-          d = json.load(sys.stdin)
-          assert d.get('status') == 'ok', f'Esperado ok, obtido: {d}'
-          print('OK')
-          "
+    - name: "GET /ready → 200 + {status: ok}"
+      run: |
+        BODY=$(curl -sf http://localhost:${{ env.PORT }}/ready)
+        echo "Response: $BODY"
+        echo "$BODY" | python3 -c "
+        import sys, json
+        d = json.load(sys.stdin)
+        assert d.get('status') == 'ok', f'Esperado ok, obtido: {d}'
+        print('OK')
+        "
 
-      - name: "GET /metrics → 200 + text/plain + counters presentes"
-        run: |
-          RESPONSE=$(curl -sf -D - http://localhost:${{ env.PORT }}/metrics)
-          echo "$RESPONSE" | grep -i "text/plain" || \
-            { echo "FALHOU: content-type errado"; exit 1; }
-          echo "$RESPONSE" | grep "requests_total" || \
-            { echo "FALHOU: metric requests_total ausente"; exit 1; }
-          echo "$RESPONSE" | grep "request_latency_seconds" || \
-            { echo "FALHOU: metric request_latency_seconds ausente"; exit 1; }
-          echo "OK"
+    - name: "GET /metrics → 200 + text/plain + counters presentes"
+      run: |
+        RESPONSE=$(curl -sf -D - http://localhost:${{ env.PORT }}/metrics)
+        echo "$RESPONSE" | grep -i "text/plain" || \
+          { echo "FALHOU: content-type errado"; exit 1; }
+        echo "$RESPONSE" | grep "requests_total" || \
+          { echo "FALHOU: metric requests_total ausente"; exit 1; }
+        echo "$RESPONSE" | grep "request_latency_seconds" || \
+          { echo "FALHOU: metric request_latency_seconds ausente"; exit 1; }
+        echo "OK"
 
-      # ── 6. SMOKE TESTS — ENDPOINTS COM BQ (mock via patch) ───────────────
+    # ── 6. SMOKE TESTS — ENDPOINTS COM BQ (mock via patch) ───────────────
 
-      - name: Instalar dependências para smoke tests BQ
-        run: |
-          pip install fastapi httpx pytest \
-            google-cloud-bigquery google-auth \
-            prometheus-client \
-            opentelemetry-api opentelemetry-sdk \
-            opentelemetry-exporter-otlp-proto-http \
-            opentelemetry-instrumentation-fastapi \
-            opentelemetry-instrumentation-httpx \
-            --quiet
+    - name: Instalar dependências para smoke tests BQ
+      run: |
+        pip install fastapi httpx pytest \
+          google-cloud-bigquery google-auth \
+          prometheus-client \
+          opentelemetry-api opentelemetry-sdk \
+          opentelemetry-exporter-otlp-proto-http \
+          opentelemetry-instrumentation-fastapi \
+          opentelemetry-instrumentation-httpx \
+          --quiet
 
-      - name: "POST /predict-severity — caso normal → 200"
-        run: |
-          python3 - <<'EOF'
-          import sys
-          from unittest.mock import patch, MagicMock
+    - name: "POST /predict-severity — caso normal → 200"
+      run: |
+        python3 - <<'EOF'
+        import sys
+        from unittest.mock import patch, MagicMock
 
-          tracing = MagicMock()
-          tracing.setup_tracing = MagicMock()
-          tracing.get_current_span = MagicMock(return_value=MagicMock())
-          sys.modules["tracing"] = tracing
+        tracing = MagicMock()
+        tracing.setup_tracing = MagicMock()
+        tracing.get_current_span = MagicMock(return_value=MagicMock())
+        sys.modules["tracing"] = tracing
 
-          sys.path.insert(0, "prediction_service_UC5_UC6")
-          from main import app
-          from fastapi.testclient import TestClient
+        sys.path.insert(0, "prediction_service_UC5_UC6")
+        from main import app
+        from fastapi.testclient import TestClient
 
-          mock_row = MagicMock()
-          mock_row.__getitem__ = lambda s, k: 2.5 if k == "predicted_severity" else None
+        mock_row = MagicMock()
+        mock_row.__getitem__ = lambda s, k: 2.5 if k == "predicted_severity" else None
 
-          mock_client = MagicMock()
-          mock_client.query.return_value.result.return_value = [mock_row]
+        mock_client = MagicMock()
+        mock_client.query.return_value.result.return_value = [mock_row]
 
-          payload = {
-              "visibility": 8.5,
-              "precipitation": 0.1,
-              "weather_condition": "Clear"
-          }
+        payload = {
+            "visibility": 8.5,
+            "precipitation": 0.1,
+            "weather_condition": "Clear"
+        }
 
-          with patch("main.get_client", return_value=mock_client):
-              r = TestClient(app).post("/predict-severity", json=payload)
-              assert r.status_code == 200, f"Status: {r.status_code} — {r.text}"
-              data = r.json()
-              assert "predicted_severity" in data
-              print(f"OK — /predict-severity: {data['predicted_severity']}")
-          EOF
+        with patch("main.get_client", return_value=mock_client):
+            r = TestClient(app).post("/predict-severity", json=payload)
+            assert r.status_code == 200, f"Status: {r.status_code} — {r.text}"
+            data = r.json()
+            assert "predicted_severity" in data
+            print(f"OK — /predict-severity: {data['predicted_severity']}")
+        EOF
 
-      - name: "POST /predict-severity — campos em falta → 422"
-        run: |
-          python3 - <<'EOF'
-          import sys
-          from unittest.mock import MagicMock
+    - name: "POST /predict-severity — campos em falta → 422"
+      run: |
+        python3 - <<'EOF'
+        import sys
+        from unittest.mock import MagicMock
 
-          tracing = MagicMock()
-          tracing.setup_tracing = MagicMock()
-          tracing.get_current_span = MagicMock(return_value=MagicMock())
-          sys.modules["tracing"] = tracing
+        tracing = MagicMock()
+        tracing.setup_tracing = MagicMock()
+        tracing.get_current_span = MagicMock(return_value=MagicMock())
+        sys.modules["tracing"] = tracing
 
-          sys.path.insert(0, "prediction_service_UC5_UC6")
-          from main import app
-          from fastapi.testclient import TestClient
+        sys.path.insert(0, "prediction_service_UC5_UC6")
+        from main import app
+        from fastapi.testclient import TestClient
 
-          r = TestClient(app).post("/predict-severity", json={"visibility": 8.5})
-          assert r.status_code == 422, f"Esperado 422, obtido {r.status_code}"
-          print("OK — campos em falta → 422")
-          EOF
+        r = TestClient(app).post("/predict-severity", json={"visibility": 8.5})
+        assert r.status_code == 422, f"Esperado 422, obtido {r.status_code}"
+        print("OK — campos em falta → 422")
+        EOF
 
-      - name: "POST /risk/score — caso normal → 200"
-        run: |
-          python3 - <<'EOF'
-          import sys
-          from unittest.mock import patch, MagicMock
+    - name: "POST /risk/score — caso normal → 200"
+      run: |
+        python3 - <<'EOF'
+        import sys
+        from unittest.mock import patch, MagicMock
 
-          tracing = MagicMock()
-          tracing.setup_tracing = MagicMock()
-          tracing.get_current_span = MagicMock(return_value=MagicMock())
-          sys.modules["tracing"] = tracing
+        tracing = MagicMock()
+        tracing.setup_tracing = MagicMock()
+        tracing.get_current_span = MagicMock(return_value=MagicMock())
+        sys.modules["tracing"] = tracing
 
-          sys.path.insert(0, "prediction_service_UC5_UC6")
-          from main import app
-          from fastapi.testclient import TestClient
+        sys.path.insert(0, "prediction_service_UC5_UC6")
+        from main import app
+        from fastapi.testclient import TestClient
 
-          risk_row = MagicMock()
-          risk_row.__getitem__ = lambda s, k: 2.5 if k == "risk_probability" else None
+        risk_row = MagicMock()
+        risk_row.__getitem__ = lambda s, k: 2.5 if k == "risk_probability" else None
 
-          nearby_row = MagicMock()
-          nearby_row.__getitem__ = lambda s, k: 5 if k == "nearby_count" else None
+        nearby_row = MagicMock()
+        nearby_row.__getitem__ = lambda s, k: 5 if k == "nearby_count" else None
 
-          mock_client = MagicMock()
-          mock_client.query.return_value.result.side_effect = [[risk_row], [nearby_row]]
+        mock_client = MagicMock()
+        mock_client.query.return_value.result.side_effect = [[risk_row], [nearby_row]]
 
-          payload = {
-              "latitude": 34.05,
-              "longitude": -118.24,
-              "timestamp": "2024-01-15T08:00:00"
-          }
+        payload = {
+            "latitude": 34.05,
+            "longitude": -118.24,
+            "timestamp": "2024-01-15T08:00:00"
+        }
 
-          with patch("main.get_client", return_value=mock_client):
-              r = TestClient(app).post("/risk/score", json=payload)
-              assert r.status_code == 200, f"Status: {r.status_code} — {r.text}"
-              data = r.json()
-              assert "accident_probability" in data
-              assert "predicted_severity" in data
-              assert "nearby_accidents_count" in data
-              print(f"OK — /risk/score: prob={data['accident_probability']}")
-          EOF
+        with patch("main.get_client", return_value=mock_client):
+            r = TestClient(app).post("/risk/score", json=payload)
+            assert r.status_code == 200, f"Status: {r.status_code} — {r.text}"
+            data = r.json()
+            assert "accident_probability" in data
+            assert "predicted_severity" in data
+            assert "nearby_accidents_count" in data
+            print(f"OK — /risk/score: prob={data['accident_probability']}")
+        EOF
 
-      - name: "POST /risk/score — timestamp inválido → 422"
-        run: |
-          python3 - <<'EOF'
-          import sys
-          from unittest.mock import MagicMock
+    - name: "POST /risk/score — timestamp inválido → 422"
+      run: |
+        python3 - <<'EOF'
+        import sys
+        from unittest.mock import MagicMock
 
-          tracing = MagicMock()
-          tracing.setup_tracing = MagicMock()
-          tracing.get_current_span = MagicMock(return_value=MagicMock())
-          sys.modules["tracing"] = tracing
+        tracing = MagicMock()
+        tracing.setup_tracing = MagicMock()
+        tracing.get_current_span = MagicMock(return_value=MagicMock())
+        sys.modules["tracing"] = tracing
 
-          sys.path.insert(0, "prediction_service_UC5_UC6")
-          from main import app
-          from fastapi.testclient import TestClient
+        sys.path.insert(0, "prediction_service_UC5_UC6")
+        from main import app
+        from fastapi.testclient import TestClient
 
-          payload = {
-              "latitude": 34.05,
-              "longitude": -118.24,
-              "timestamp": "not-a-date"
-          }
+        payload = {
+            "latitude": 34.05,
+            "longitude": -118.24,
+            "timestamp": "not-a-date"
+        }
 
-          r = TestClient(app).post("/risk/score", json=payload)
-          assert r.status_code == 422, f"Esperado 422, obtido {r.status_code}"
-          print("OK — timestamp inválido → 422")
-          EOF
+        r = TestClient(app).post("/risk/score", json=payload)
+        assert r.status_code == 422, f"Esperado 422, obtido {r.status_code}"
+        print("OK — timestamp inválido → 422")
+        EOF
 
-      - name: "POST /risk/score — BQ falha → 500"
-        run: |
-          python3 - <<'EOF'
-          import sys
-          from unittest.mock import patch, MagicMock
+    - name: "POST /risk/score — BQ falha → 500"
+      run: |
+        python3 - <<'EOF'
+        import sys
+        from unittest.mock import patch, MagicMock
 
-          tracing = MagicMock()
-          tracing.setup_tracing = MagicMock()
-          tracing.get_current_span = MagicMock(return_value=MagicMock())
-          sys.modules["tracing"] = tracing
+        tracing = MagicMock()
+        tracing.setup_tracing = MagicMock()
+        tracing.get_current_span = MagicMock(return_value=MagicMock())
+        sys.modules["tracing"] = tracing
 
-          sys.path.insert(0, "prediction_service_UC5_UC6")
-          from main import app
-          from fastapi.testclient import TestClient
+        sys.path.insert(0, "prediction_service_UC5_UC6")
+        from main import app
+        from fastapi.testclient import TestClient
 
-          mock_client = MagicMock()
-          mock_client.query.side_effect = Exception("BQ unavailable")
+        mock_client = MagicMock()
+        mock_client.query.side_effect = Exception("BQ unavailable")
 
-          payload = {
-              "latitude": 34.05,
-              "longitude": -118.24,
-              "timestamp": "2024-01-15T08:00:00"
-          }
+        payload = {
+            "latitude": 34.05,
+            "longitude": -118.24,
+            "timestamp": "2024-01-15T08:00:00"
+        }
 
-          with patch("main.get_client", return_value=mock_client):
-              r = TestClient(app, raise_server_exceptions=False).post("/risk/score", json=payload)
-              assert r.status_code == 500, f"Esperado 500, obtido {r.status_code}"
-              print("OK — BQ falha → 500")
-          EOF
+        with patch("main.get_client", return_value=mock_client):
+            r = TestClient(app, raise_server_exceptions=False).post("/risk/score", json=payload)
+            assert r.status_code == 500, f"Esperado 500, obtido {r.status_code}"
+            print("OK — BQ falha → 500")
+        EOF
 
-      # ── 7. LOGS EM CASO DE FALHA ─────────────────────────────────────────
-      - name: Logs do contentor (em caso de falha)
-        if: failure()
-        run: docker logs ${{ env.IMAGE }}
+    # ── 7. LOGS EM CASO DE FALHA ─────────────────────────────────────────
+    - name: Logs do contentor (em caso de falha)
+      if: failure()
+      run: docker logs ${{ env.IMAGE }}
 
-      # ── 8. CLEANUP ───────────────────────────────────────────────────────
-      - name: Parar e remover contentor
-        if: always()
-        run: |
-          docker stop ${{ env.IMAGE }} || true
-          docker rm   ${{ env.IMAGE }} || true
+    # ── 8. CLEANUP ───────────────────────────────────────────────────────
+    - name: Parar e remover contentor
+      if: always()
+      run: |
+        docker stop ${{ env.IMAGE }} || true
+        docker rm   ${{ env.IMAGE }} || true
