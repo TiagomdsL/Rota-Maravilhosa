@@ -95,7 +95,13 @@ spec:
       name: cpu
       target:
         type: Utilization
-        averageUtilization: 60
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 75
 
 --- #hpa prediction_service_uc9_uc10
 apiVersion: autoscaling/v2
@@ -108,7 +114,7 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: prediction-service-uc9-uc10
-  minReplicas: 1
+  minReplicas: 2
   maxReplicas: 7
   metrics: 
   - type: Resource
@@ -116,7 +122,7 @@ spec:
       name: cpu
       target:
         type: Utilization
-        averageUtilization: 60
+        averageUtilization: 70
   - type: Resource
     resource:
       name: memory
@@ -142,13 +148,13 @@ spec:
       name: cpu
       target:
         type: Utilization
-        averageUtilization: 70
+        averageUtilization: 75
   - type: Resource
     resource:
       name: memory
       target:
         type: Utilization
-        averageUtilization: 60
+        averageUtilization: 70
 --- #hpa data-service-uc123
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
@@ -160,7 +166,7 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: data-service-uc123
-  minReplicas: 1
+  minReplicas: 2
   maxReplicas: 5
   metrics: 
   - type: Resource
@@ -168,10 +174,10 @@ spec:
       name: cpu
       target:
         type: Utilization
-        averageUtilization: 50
+        averageUtilization: 80
   - type: Resource
     resource:
       name: memory
       target:
         type: Utilization
-        averageUtilization: 50
+        averageUtilization: 75
