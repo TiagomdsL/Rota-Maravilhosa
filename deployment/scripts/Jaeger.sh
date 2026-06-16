@@ -1,17 +1,19 @@
 #!/bin/bash
 # 01-install-jaeger.sh
-# Script para instalar Jaeger e OpenTelemetry Collector
+# Script para instalar Jaeger 
 
 set -e
 
-echo "🚀 A instalar Jaeger e OpenTelemetry Collector..."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+echo " A instalar Jaeger e OpenTelemetry Collector..."
 
 # 1. Criar namespace
-echo "📁 Criando namespace observability..."
+echo " Criando namespace observability..."
 kubectl create namespace observability --dry-run=client -o yaml | kubectl apply -f -
 
 # 2. Instalar Jaeger all-in-one (sem operator)
-echo "📦 Instalando Jaeger..."
+echo " Instalando Jaeger..."
 cat << 'EOF' | kubectl apply -f -
 apiVersion: apps/v1
 kind: Deployment
@@ -58,84 +60,16 @@ spec:
 EOF
 
 # 3. Aguardar Jaeger
-echo "⏳ Aguardando Jaeger..."
+echo " Aguardando Jaeger..."
 sleep 10
 kubectl wait --namespace observability --for=condition=ready pod --all --timeout=60s
 
-# 4. Instalar OpenTelemetry Collector
-echo "📦 Instalando OpenTelemetry Collector..."
-
-cat << 'EOT' | kubectl apply -f -
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: otel-collector-config
-  namespace: observability
-data:
-  config.yaml: |
-    receivers:
-      otlp:
-        protocols:
-          http:
-            endpoint: 0.0.0.0:4318
-    processors:
-      batch:
-        timeout: 1s
-    exporters:
-      debug:
-        verbosity: detailed
-    service:
-      pipelines:
-        traces:
-          receivers: [otlp]
-          processors: [batch]
-          exporters: [debug]
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: otel-collector
-  namespace: observability
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: otel-collector
-  template:
-    metadata:
-      labels:
-        app: otel-collector
-    spec:
-      containers:
-      - name: otel-collector
-        image: otel/opentelemetry-collector:latest
-        args: ["--config=/etc/otel/config.yaml"]
-        ports:
-        - containerPort: 4318
-          name: otlp-http
-        volumeMounts:
-        - name: config
-          mountPath: /etc/otel
-      volumes:
-      - name: config
-        configMap:
-          name: otel-collector-config
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: otel-collector
-  namespace: observability
-spec:
-  selector:
-    app: otel-collector
-  ports:
-  - name: otlp-http
-    port: 4318
-    targetPort: 4318
-EOT
+# 4. Instalar OpenTelemetry Collector a partir do YAML
+echo " Instalando OpenTelemetry Collector..."
+kubectl apply -f "$SCRIPT_DIR/otel-collector.yaml"
 
 # 5. Criar alias DNS no namespace rota-maravilhosa
+echo " Criando alias DNS..."
 cat << 'EOT' | kubectl apply -f -
 apiVersion: v1
 kind: Service
@@ -148,10 +82,10 @@ spec:
 EOT
 
 echo ""
-echo "✅ Jaeger e OpenTelemetry Collector instalados!"
+echo " Jaeger e OpenTelemetry Collector instalados!"
 echo ""
-echo "🔍 Para verificar:"
+echo " Para verificar:"
 echo "   kubectl get pods -n observability"
 echo ""
-echo "🌐 Para aceder ao Jaeger:"
+echo " Para aceder ao Jaeger:"
 echo "   kubectl port-forward -n observability svc/jaeger 16686:16686"
